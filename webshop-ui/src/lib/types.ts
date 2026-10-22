@@ -30,6 +30,21 @@ export type Stock = {
   available: number;
 };
 
+/** Kết quả từ search-service (read model Elasticsearch, có thể trễ vài giây). Không có tồn kho — xem Stock. */
+export type SearchHit = {
+  productId: string;
+  name: string;
+  description: string;
+  priceVnd: number;
+  score: number | null;
+};
+
+export type SearchResult = {
+  items: SearchHit[];
+  totalElements: number;
+  tookMs: number;
+};
+
 export type CartItem = {
   productId: string;
   quantity: number;

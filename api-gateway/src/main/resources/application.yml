@@ -43,6 +43,11 @@ spring:
               uri: ${ORDER_SERVICE_URL:http://localhost:8086}
               predicates:
                 - Path=/api/orders/**
+            # Chỉ chạy khi bật profile "search"; tắt thì route này trả lỗi kết nối — các luồng khác không ảnh hưởng.
+            - id: search
+              uri: ${SEARCH_SERVICE_URL:http://localhost:8087}
+              predicates:
+                - Path=/api/search/**
             # Tài liệu OpenAPI của từng service, phục vụ Swagger UI tổng hợp ở gateway (/swagger-ui.html).
             - id: docs-auth
               uri: ${AUTH_SERVICE_URL:http://localhost:8081}
@@ -80,6 +85,12 @@ spring:
                 - Path=/docs/order/v3/api-docs
               filters:
                 - SetPath=/v3/api-docs
+            - id: docs-search
+              uri: ${SEARCH_SERVICE_URL:http://localhost:8087}
+              predicates:
+                - Path=/docs/search/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
 
 # Swagger UI tổng hợp: dropdown chọn service; "Try it out" gọi qua gateway (server mặc định trong mỗi spec).
 springdoc:
@@ -102,6 +113,8 @@ springdoc:
         url: /docs/payment/v3/api-docs
       - name: order-service
         url: /docs/order/v3/api-docs
+      - name: search-service
+        url: /docs/search/v3/api-docs
 
 management:
   endpoints:

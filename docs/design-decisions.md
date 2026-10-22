@@ -97,3 +97,81 @@ Mỗi mục trả lời: **vì sao dùng**, **giải quyết vấn đề gì**, 
 ## 11. Không dùng service discovery (Eureka)
 
 URL các service cấu hình qua biến môi trường (`PRODUCT_SERVICE_URL`, ...). Docker Compose cung cấp DNS nội bộ. Trên nền tảng thật, DNS của nền tảng (hoặc service mesh) thường thay thế Eureka.
+
+## 12. Search: CDC (Debezium → Kafka) → Elasticsearch, thay vì gọi đồng bộ hoặc dùng Outbox sẵn có
+
+- **Vấn đề**: tìm sản phẩm full-text, không dấu, gõ dở, lọc/sắp xếp theo giá. PostgreSQL `LIKE` không làm được
+  (không dấu, độ liên quan, chịu gõ sai) mà vẫn nhanh khi dữ liệu lớn.
+- **Thiết kế**: search-service giữ một **read model** (CQRS) trong Elasticsearch. Debezium đọc WAL của PostgreSQL
+  (logical decoding, `pgoutput`) cho đúng bảng `products` → Kafka → search-service upsert vào index.
+- **Vì sao CDC thay vì để service tự publish event**: không phải sửa code Product (không có "quên publish" — mọi thay
+  đổi đã commit, kể cả UPDATE bằng SQL tay, đều đi ra). Snapshot ban đầu (`snapshot.mode=initial`) dựng index từ dữ
+  liệu sẵn có mà không cần job import riêng.
+- **Vì sao Kafka (không dùng lại RabbitMQ)**: Debezium chạy trên Kafka Connect; Kafka giữ thứ tự **theo key**
+  (key = khóa chính → mọi thay đổi của một sản phẩm nằm cùng partition), lưu lại log để **replay** (dựng lại index =
+  consumer group mới đọc từ đầu), và topic **compacted** giữ bản mới nhất của mỗi key nên replay không phình theo
+  thời gian. RabbitMQ xóa message sau khi ack nên không replay được.
+
+### Vì sao tồn kho KHÔNG nằm trong index
+
+Bản đầu gộp `inventory_item` vào cùng document (lọc "còn hàng"). Đã bỏ, vì:
+
+1. **Elasticsearch không cập nhật tại chỗ**: mỗi `update` = đọc document, chạy script, **index lại cả document**
+   (phân tích lại `name`/`description`, kể cả edge n-gram), đánh dấu bản cũ đã xóa. Đổi một con số tồn kho tốn
+   như index lại cả sản phẩm.
+2. **Tồn kho đổi ở mỗi bước Saga**: reserve, commit, release → 2–3 lần index lại mỗi sản phẩm mỗi đơn. Flash sale
+   10 000 đơn cho một sản phẩm ≈ 20 000 lần index lại **cùng một document**, tuần tự trên một partition (key = id) —
+   lag tăng, và truy vấn tìm kiếm chậm đi đúng lúc đông người nhất.
+3. **Con số trong index vốn đã sai**: trễ ~1–2 giây lúc bình thường, nhiều hơn khi tải cao. Checkout mới là nơi quyết
+   định (Inventory giữ hàng bằng khóa), nên search không cần con số chính xác.
+4. **Không lọc/sắp xếp theo tồn kho** (các sàn lớn cũng không có bộ lọc "còn hàng") → không còn lý do nào để index nó.
+
+Thay vào đó UI tìm trước, rồi đọc **tồn kho thật** cho đúng các sản phẩm đang hiển thị (≤ 50) bằng
+`GET /api/inventory/batch` — một request, số luôn đúng, flash sale không chạm tới Elasticsearch. Nếu sau này cần lọc
+theo tồn kho, index **trạng thái thô** (`IN_STOCK`/`LOW_STOCK`/`OUT_OF_STOCK`) và chỉ ghi khi vượt ngưỡng
+(`REPLICA IDENTITY FULL` để so trạng thái `before`/`after` trước khi gọi Elasticsearch), không index số lượng.
+
+### Trade-off — cái giá phải trả
+
+1. **Coupling vào schema**: tên cột (`price_vnd`, `updated_at`) trở thành hợp đồng với search-service. Đổi tên cột là
+   breaking change. Cách giảm: Debezium **Outbox Event Router** (CDC trên bảng `outbox_event`, payload do service tự
+   định nghĩa) — tách schema nội bộ khỏi hợp đồng, đổi lại phải sửa code service để ghi outbox. Ở đây chọn CDC bảng thô
+   vì mục đích học CDC; hệ thống thật thường dùng outbox khi nhiều team phụ thuộc.
+2. **Eventual consistency**: kết quả tìm kiếm trễ vài trăm ms tới vài giây. Giá trong search **chỉ để hiển thị** —
+   checkout luôn đọc giá từ Product Service.
+3. **Vận hành**: thêm Kafka, Kafka Connect, Elasticsearch (~2.5GB RAM) → để trong compose profile `search`.
+   Replication slot giữ WAL của **cả server** tới khi Debezium xác nhận đã đọc: Debezium tắt lâu → WAL tích tụ. Chặn
+   bằng `max_slot_wal_keep_size=1GB` (vượt trần thì slot bị vô hiệu → phải snapshot lại, nhưng các database khác không
+   bị đầy đĩa). Gỡ connector **không** gỡ slot — phải `pg_drop_replication_slot` tay. Theo dõi:
+   `SELECT slot_name, active, wal_status FROM pg_replication_slots;`.
+
+### Đúng thứ tự và idempotent
+
+- Consumer commit offset sau mỗi record (at-least-once). Xử lý lại an toàn vì script so `version` (cột `@Version` của
+  JPA): bản có version **nhỏ hơn** bản đang có bị bỏ qua (`noop`) — bảo vệ khi replay đè lên dữ liệu mới hơn. Cho phép
+  version **bằng**: UPDATE bằng SQL thô không tăng version, nhưng trong cùng partition bản đến sau luôn mới hơn.
+- Xóa sản phẩm → đánh dấu `deleted=true` vĩnh viễn (UUID không dùng lại) nên bản cũ đến muộn không "hồi sinh" nó.
+- Lỗi tạm thời (Elasticsearch down) → **retry mãi, chặn partition** thay vì đẩy sang DLT: bỏ qua một bản cập nhật rồi
+  áp dụng bản sau sẽ làm read model sai. Chỉ message không đọc được mới vào `<topic>.DLT`. Đây là khác biệt cố ý với
+  consumer RabbitMQ (mục 9), nơi các command độc lập với nhau nên retry queue + DLQ không làm sai thứ tự nghiệp vụ.
+
+### Đổi mapping không downtime (blue/green)
+
+Ghi vào index thật (`products-v2`), đọc qua alias `products`. Index mới = consumer group mới
+(`search-indexer-<index>`) đọc topic từ đầu vào index mới trong khi alias vẫn trỏ index cũ; khi listener **idle** (đã
+đọc hết topic) mới chuyển alias bằng một request `_aliases` nguyên tử. Hai điều kiện để cơ chế này đúng — cả hai đều
+từng sai và chỉ lộ ra khi chạy với Kafka/Debezium thật:
+
+- **Group phải thật sự mới.** `@KafkaListener(id = ...)` mặc định dùng `id` làm group id, ghi đè cấu hình → group cũ
+  (đã có offset) không replay gì, "idle" đến ngay và alias chuyển sang **index rỗng**. Sửa: `idIsGroup = false`.
+- **Topic phải do Debezium tạo.** Nếu consumer khởi động trước khi connector được đăng ký và được phép tự tạo topic,
+  broker tạo topic với cấu hình mặc định (1 partition, `cleanup.policy=delete` — xóa sau 7 ngày); Debezium thấy topic
+  đã có nên dùng luôn → mất compaction, replay sau 7 ngày thiếu các sản phẩm không đổi. Sửa:
+  `allow.auto.create.topics=false` ở consumer.
+
+### Bảo mật
+
+User `cdc_user` chỉ có `REPLICATION`, `CONNECT` vào `product_db` và `SELECT` đúng bảng `products`; publication chỉ
+chứa bảng đó (Debezium không thấy outbox hay bảng nào khác). Mật khẩu truyền qua `EnvVarConfigProvider`
+(`${env:CDC_DB_PASSWORD}`), không nằm trong cấu hình connector lưu ở topic `_connect_configs`. Elasticsearch tắt
+security **chỉ ở local**.

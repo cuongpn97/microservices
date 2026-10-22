@@ -16,3 +16,12 @@ Nguyên tắc:
 - Version được pin trong `pom.xml` gốc; mọi module kế thừa.
 - Gateway là ứng dụng WebFlux nên KHÔNG phụ thuộc `common-web` (Servlet).
 - Testcontainers dùng Docker Desktop (đã kiểm tra với Docker Engine 28.0.1 trên Windows 11).
+
+## Search (profile `search`)
+
+| Thành phần | Phiên bản | Ghi chú |
+|---|---|---|
+| Elasticsearch | 8.18.8 (`docker.elastic.co/elasticsearch/elasticsearch`) | Trùng version với `elasticsearch-java` mà Spring Boot 3.5.16 quản lý (`elasticsearch-client.version`). Client 8.x chỉ đảm bảo tương thích với server 8.x. |
+| Kafka broker | 3.9.2 (`apache/kafka`, KRaft, không ZooKeeper) | Trùng `kafka-clients` 3.9.2 của Boot 3.5.16 (Spring Kafka 3.3.16). Cùng image cho compose và Testcontainers. |
+| Debezium | 3.5.2.Final (`quay.io/debezium/connect`) | Bản stable mới nhất; build trên Kafka Connect 4.1 — worker 4.x nói chuyện được với broker 3.9. Dùng image chính thức trên quay.io. |
+| PostgreSQL connector | `pgoutput` | Plugin logical decoding có sẵn trong PostgreSQL ≥ 10, không cần cài extension (`wal2json`/`decoderbufs`). |

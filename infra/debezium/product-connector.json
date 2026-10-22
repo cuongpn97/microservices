@@ -1,0 +1,29 @@
+{
+  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+  "tasks.max": "1",
+  "plugin.name": "pgoutput",
+
+  "database.hostname": "postgres",
+  "database.port": "5432",
+  "database.user": "cdc_user",
+  "database.password": "${env:CDC_DB_PASSWORD}",
+  "database.dbname": "product_db",
+
+  "topic.prefix": "cdc.product",
+  "table.include.list": "public.products",
+  "publication.name": "dbz_product",
+  "publication.autocreate.mode": "disabled",
+  "slot.name": "dbz_product",
+  "snapshot.mode": "initial",
+
+  "heartbeat.interval.ms": "10000",
+
+  "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+  "key.converter.schemas.enable": "false",
+  "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+  "value.converter.schemas.enable": "false",
+
+  "topic.creation.default.replication.factor": "1",
+  "topic.creation.default.partitions": "3",
+  "topic.creation.default.cleanup.policy": "compact"
+}

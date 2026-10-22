@@ -31,7 +31,9 @@ có bồi hoàn, retry có backoff + jitter, DLQ, circuit breaker, khóa/cập n
 ├── inventory-service/  :8084     # inventory_db
 ├── payment-service/    :8085     # payment_db
 ├── order-service/      :8086     # order_db — Saga orchestrator
-├── infra/postgres/init/          # tạo 6 database + 6 user (không quyền chéo)
+├── search-service/     :8087     # Elasticsearch read model, dựng từ CDC (profile "search")
+├── infra/postgres/init/          # tạo 6 database + 6 user (không quyền chéo) + user CDC
+├── infra/debezium/               # cấu hình connector Debezium + script đăng ký
 ├── docker-compose.yml, .env.example
 ├── webshop-ui/         :3000     # Giao diện demo Next.js 16 (BFF proxy, theo dõi Saga, trang quản trị)
 ├── scripts/                      # demo.sh, demo-failures.sh (bản dòng lệnh của các kịch bản)
@@ -81,6 +83,53 @@ Mỗi spec dùng server tương đối `/` nên "Try it out" luôn gửi về đ
 
 Dừng: `docker compose down` (giữ dữ liệu) hoặc `docker compose down -v` (xóa volume, migration chạy lại từ đầu).
 
+### Search (CDC: Debezium → Kafka → Elasticsearch)
+
+Tách thành profile vì cần thêm ~2.5GB RAM (Kafka, Kafka Connect, Elasticsearch):
+
+```bash
+./mvnw -B package -DskipTests
+docker compose --profile search up -d --build
+docker compose logs connect-init                  # connector đã đăng ký, trạng thái RUNNING
+curl -s 'localhost:8080/api/search/products?q=ban%20phim'
+```
+
+Trên UI, ô tìm kiếm ở trang Cửa hàng gọi search-service. Thử sửa giá (Swagger, ADMIN) rồi tìm lại: kết quả
+đổi sau khoảng 1–2 giây — đó là độ trễ của CDC.
+
+| URL | Dùng để |
+|---|---|
+| http://localhost:8090/connectors?expand=status | REST API Kafka Connect: trạng thái connector |
+| http://localhost:9200/products/_search?pretty | Xem trực tiếp document trong Elasticsearch |
+| `localhost:29092` | Kafka từ máy host (ví dụ `kafka-console-consumer.sh --topic cdc.product.public.products`) |
+
+**Volume PostgreSQL đã có từ trước** (script init không chạy lại): tạo user CDC một lần **trước** khi chạy profile
+`search`, khi đó migration mới của product-service tự GRANT quyền đọc bảng:
+
+```bash
+docker compose up -d postgres
+docker compose exec postgres psql -U postgres -c "CREATE ROLE cdc_user WITH LOGIN REPLICATION PASSWORD 'local-only-cdc-db-pw'" \
+  -c "GRANT CONNECT ON DATABASE product_db TO cdc_user"
+```
+
+Nếu product-service đã chạy migration CDC trước khi có user (GRANT bị bỏ qua), cấp quyền tay:
+
+```bash
+docker compose exec postgres psql -U postgres -d product_db -c "GRANT USAGE ON SCHEMA public TO cdc_user; GRANT SELECT ON products TO cdc_user"
+```
+
+**Nâng cấp từ bản có index tồn kho** (connector `webshop-inventory`): `connect-init` tự gỡ connector, nhưng
+replication slot vẫn còn và **giữ WAL của cả PostgreSQL server** (tới trần `max_slot_wal_keep_size`) — phải drop tay:
+
+```bash
+docker compose exec postgres psql -U postgres -c "SELECT pg_drop_replication_slot('dbz_inventory')"
+docker compose exec postgres psql -U postgres -c "SELECT slot_name, active, wal_status FROM pg_replication_slots"
+```
+
+(Hoặc `docker compose down -v` để làm lại từ đầu.) Kiến trúc và trade-off:
+[architecture.md mục 10](docs/architecture.md#10-search-cdc--kafka--elasticsearch-profile-search),
+[design-decisions.md mục 12](docs/design-decisions.md#12-search-cdc-debezium--kafka--elasticsearch-thay-vì-gọi-đồng-bộ-hoặc-dùng-outbox-sẵn-có).
+
 ### Migrations
 
 Flyway chạy tự động khi mỗi service khởi động (`spring.flyway.enabled=true`, `ddl-auto=validate` — Hibernate không bao giờ
@@ -119,13 +168,15 @@ Test đáng đọc nhất:
 | `CheckoutSagaTest` | Máy trạng thái Saga thuần (không DB): bồi hoàn, timeout, reply trễ/trùng |
 | `CheckoutSagaIT` | Saga end-to-end qua RabbitMQ thật; checkout trùng; phục hồi sau restart; capture thành công nhưng reply mất |
 | `GatewayIT` | JWT ở biên, CORS, giới hạn kích thước, không lộ `/admin` |
+| `SearchCdcIT` | Tìm không dấu và theo tiền tố; index mới dựng sau alias, chỉ chuyển alias khi đã bắt kịp; bản cũ replay không ghi đè bản mới; xóa không "hồi sinh"; message hỏng vào DLT mà không chặn partition |
 
 ## Endpoint chính (qua gateway :8080)
 
 | Method | Path | Auth |
 |---|---|---|
 | POST | `/api/auth/register`, `/api/auth/login` | public |
-| GET | `/api/products`, `/api/products/{id}`, `/api/inventory/{productId}` | public |
+| GET | `/api/products`, `/api/products/{id}`, `/api/inventory/{productId}`, `/api/inventory/batch` | public |
+| GET | `/api/search/products?q=&minPriceVnd=&maxPriceVnd=&sort=` (profile `search`) | public |
 | GET/POST/PUT/DELETE | `/api/cart`, `/api/cart/items[/{productId}]` | USER |
 | POST | `/api/orders/checkout` (header `Idempotency-Key`) | USER |
 | GET | `/api/orders`, `/api/orders/{id}` | USER |

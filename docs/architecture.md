@@ -358,3 +358,29 @@ ra ngoài trong handler); Saga retry là tầng nghiệp vụ dài hạn, mỗi 
 - Log JSON (ECS) trong container, có `correlationId` và `sagaId` trong MDC; correlationId đi qua HTTP header
   `X-Correlation-Id` và field `correlationId` của envelope.
 - RabbitMQ Management UI: http://localhost:15672.
+
+## 10. Search: CDC → Kafka → Elasticsearch (profile `search`)
+
+```mermaid
+flowchart LR
+    P[(product_db<br/>products)] -- WAL / pgoutput --> DP[Debezium connector<br/>webshop-product<br/>slot dbz_product]
+    DP --> T1[[cdc.product.public.products<br/>compacted]]
+    T1 --> S[search-service<br/>group search-indexer-products-v2]
+    S -- scripted upsert, so version<br/>ghi vào index THẬT --> ES[(products-v2)]
+    A{{alias products}} -- đọc --> ES
+    S -. message hỏng .-> DLT[[topic.DLT]]
+    GW[API Gateway] -- GET /api/search/products --> S
+    UI[webshop-ui] -- 1. tìm --> GW
+    UI -- 2. tồn kho thật của các id đang hiển thị<br/>GET /api/inventory/batch --> GW
+```
+
+- **Một document = một sản phẩm**, chỉ từ bảng `products`. **Tồn kho không nằm trong index** (lý do:
+  [design-decisions.md mục 12](design-decisions.md#12-search-cdc-debezium--kafka--elasticsearch-thay-vì-gọi-đồng-bộ-hoặc-dùng-outbox-sẵn-có)):
+  UI tìm trước, rồi đọc tồn kho thật cho đúng các sản phẩm đang hiển thị bằng một request batch.
+- **Thứ tự**: key Kafka = khóa chính → mọi thay đổi của một sản phẩm cùng partition, đúng thứ tự commit.
+- **Tìm không dấu**: analyzer `standard` + `lowercase` + `asciifolding(preserve_original)` → "ban phim" khớp
+  "Bàn phím" và gõ có dấu vẫn được điểm cao hơn; trường `name.prefix` (edge n-gram) cho kết quả khi đang gõ dở.
+- **Đổi mapping (blue/green)**: ghi vào index thật, đọc qua alias. Tăng `webshop.search.index-name` (v2 → v3) và thêm
+  `elasticsearch/products-v3.json` → khi khởi động: tạo v3 rỗng, consumer group mới `search-indexer-products-v3` đọc
+  topic từ đầu vào v3 trong khi alias vẫn trỏ v2; listener idle (đã đọc hết) → chuyển alias nguyên tử. Xóa index cũ
+  và group cũ sau khi kiểm tra.

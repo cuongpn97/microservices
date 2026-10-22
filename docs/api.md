@@ -235,6 +235,32 @@ curl -s -i -X POST localhost:8080/api/orders/checkout \
 
 ---
 
+## Search (`search-service`, profile `search`) — public
+
+### `GET /api/search/products`
+
+| Tham số | Mặc định | Mô tả |
+|---|---|---|
+| `q` | — | Từ khóa (≤ 200 ký tự), không phân biệt dấu (`ban phim` khớp "Bàn phím"), chấp nhận gõ sai nhẹ và tiền tố |
+| `minPriceVnd`, `maxPriceVnd` | — | Khoảng giá (VND, số nguyên) |
+| `sort` | `RELEVANCE` | `RELEVANCE` · `PRICE_ASC` · `PRICE_DESC` · `NAME` |
+| `page`, `size` | `0`, `20` | `size` ≤ 50; `(page + 1) * size` ≤ 10 000 (lỗi `PAGE_TOO_DEEP`) |
+
+```bash
+curl -s 'localhost:8080/api/search/products?q=ban%20phim&sort=PRICE_ASC'
+```
+
+```json
+{"items":[{"productId":"11111111-1111-1111-1111-111111111111","name":"Mechanical Keyboard","description":"Bàn phím cơ 87 phím",
+  "priceVnd":1500000,"score":3.2}],"page":0,"size":20,"totalElements":1,"tookMs":4}
+```
+
+Dữ liệu là read model dựng từ CDC: trễ vài giây so với Product Service. **Không trả tồn kho** (thay đổi quá thường
+xuyên để index — xem design-decisions mục 12): lấy số thật bằng `GET /api/inventory/batch?ids=..` cho các sản phẩm
+đang hiển thị. Elasticsearch không kết nối được ⇒ `503 DEPENDENCY_UNAVAILABLE`.
+
+---
+
 ## DLQ admin (mọi service có consumer, role ADMIN)
 
 | Method | Path |

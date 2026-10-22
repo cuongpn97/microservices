@@ -1,0 +1,62 @@
+server:
+  port: ${SERVER_PORT:8087}
+  shutdown: graceful
+
+spring:
+  application:
+    name: search-service
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
+    connection-timeout: 2s
+    socket-timeout: 5s
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    consumer:
+      # Group gắn với tên index: index mới (products-v3, ...) = group mới chưa có offset → đọc lại topic từ đầu
+      # và dựng index mới từ đầu. Topic compacted nên vẫn giữ đủ bản mới nhất của mọi sản phẩm.
+      group-id: search-indexer-${webshop.search.index-name}
+      auto-offset-reset: earliest
+      # Value là JSON thô của Debezium; tự parse để đọc được cả tombstone (value = null).
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      enable-auto-commit: false
+      properties:
+        # KHÔNG để consumer tự tạo topic: search-service thường khởi động trước khi connector được đăng ký; nếu tự
+        # tạo, topic nhận cấu hình mặc định của broker (1 partition, cleanup.policy=delete — xóa sau 7 ngày) và Debezium
+        # dùng luôn topic đó → mất compaction, replay để dựng lại index sẽ thiếu dữ liệu. Topic phải do Debezium tạo.
+        allow.auto.create.topics: false
+        # Topic chưa tồn tại lúc subscribe → làm mới metadata thường xuyên để thấy topic ngay khi Debezium tạo.
+        metadata.max.age.ms: 10000
+    listener:
+      # Commit offset sau khi xử lý xong từng record → at-least-once; xử lý lặp an toàn nhờ so version.
+      ack-mode: record
+      # Phát ListenerContainerIdleEvent khi không có record mới trong 5s = đã đọc hết topic → ProductIndexBootstrap
+      # dùng tín hiệu này để chuyển alias sang index vừa dựng lại.
+      idle-event-interval: 5s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+webshop:
+  security:
+    jwt:
+      secret: ${JWT_SECRET}
+      issuer: ${JWT_ISSUER:webshop-auth}
+  search:
+    # Index thật có version; ứng dụng chỉ đọc/ghi qua alias → đổi mapping bằng cách dựng index mới rồi chuyển alias.
+    index-alias: products
+    # v2: bỏ các trường tồn kho — search không lọc/sắp xếp theo tồn kho (docs/design-decisions.md mục 12).
+    index-name: products-v2
+    topics:
+      products: ${CDC_TOPIC_PRODUCTS:cdc.product.public.products}

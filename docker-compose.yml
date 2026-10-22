@@ -27,6 +27,11 @@ x-service-env: &service-env
 services:
   postgres:
     image: postgres:16-alpine
+    # wal_level=logical: cho phép Debezium đọc thay đổi qua logical decoding (profile search).
+    # max_slot_wal_keep_size: trần WAL giữ lại cho replication slot — nếu Debezium tắt lâu, slot bị vô hiệu hóa
+    # (phải snapshot lại) thay vì WAL phình tới đầy đĩa và làm sập CẢ sáu database.
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=10", "-c", "max_wal_senders=10",
+              "-c", "max_slot_wal_keep_size=1GB"]
     environment:
       POSTGRES_USER: ${POSTGRES_SUPERUSER}
       POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
@@ -36,6 +41,7 @@ services:
       INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD}
       PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD}
       ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD}
+      CDC_DB_PASSWORD: ${CDC_DB_PASSWORD:-}
     volumes:
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
       - pgdata:/var/lib/postgresql/data
@@ -149,6 +155,7 @@ services:
       INVENTORY_SERVICE_URL: http://inventory-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
       ORDER_SERVICE_URL: http://order-service:8086
+      SEARCH_SERVICE_URL: http://search-service:8087
     ports:
       - "8080:8080"
     depends_on:
@@ -180,6 +187,130 @@ services:
     depends_on:
       - api-gateway
 
+  # ------------------------------------------------------------------ Search (CDC) — profile "search"
+  #   docker compose --profile search up -d
+  # Luồng: PostgreSQL WAL → Debezium (Kafka Connect) → Kafka → search-service → Elasticsearch.
+  # Tách profile vì bộ này cần thêm ~2.5GB RAM; stack mặc định chạy được mà không có nó.
+
+  kafka:
+    image: apache/kafka:3.9.2
+    profiles: ["search"]
+    restart: unless-stopped
+    mem_limit: 768m
+    environment:
+      # KRaft một node (không ZooKeeper): node vừa là broker vừa là controller.
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    ports:
+      - "29092:29092"   # từ máy host: localhost:29092
+    # Không mount volume: image chạy bằng user không phải root, volume mới tạo thuộc root → broker không ghi được.
+    # Mất dữ liệu Kafka khi xóa container là chấp nhận được ở local: Debezium thấy mất offset sẽ snapshot lại.
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.18.8
+    profiles: ["search"]
+    restart: unless-stopped
+    mem_limit: 1g
+    environment:
+      discovery.type: single-node
+      # LOCAL ONLY: tắt security để demo gọn. Production: bật xpack.security + TLS + user riêng cho search-service.
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' > /dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  kafka-connect:
+    image: quay.io/debezium/connect:3.5.2.Final
+    profiles: ["search"]
+    restart: unless-stopped
+    mem_limit: 768m
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: webshop-connect
+      # Kafka Connect lưu cấu hình connector, offset (vị trí LSN đã đọc) và trạng thái trong chính Kafka.
+      CONFIG_STORAGE_TOPIC: _connect_configs
+      OFFSET_STORAGE_TOPIC: _connect_offsets
+      STATUS_STORAGE_TOPIC: _connect_statuses
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      # "${env:CDC_DB_PASSWORD}" trong JSON connector được thay bằng biến môi trường này → secret không nằm trong
+      # cấu hình lưu ở topic _connect_configs.
+      CONNECT_CONFIG_PROVIDERS: env
+      CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
+      CDC_DB_PASSWORD: ${CDC_DB_PASSWORD:-}
+      HEAP_OPTS: -Xms256m -Xmx512m
+    ports:
+      - "8090:8083"     # REST API Kafka Connect: http://localhost:8090/connectors
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/connectors > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # Job chạy một lần: đăng ký connector rồi thoát (PUT idempotent nên chạy lại vô hại).
+  connect-init:
+    image: curlimages/curl:8.11.1
+    profiles: ["search"]
+    restart: "no"
+    entrypoint: ["sh", "/debezium/register-connectors.sh"]
+    volumes:
+      - ./infra/debezium:/debezium:ro
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+      # Publication/GRANT do Flyway của product-service tạo → connector phải đăng ký SAU khi migration chạy xong.
+      product-service:
+        condition: service_healthy
+
+  search-service:
+    build: ./search-service
+    profiles: ["search"]
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER:-webshop-auth}
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: ${LOG_FORMAT:-ecs}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ELASTICSEARCH_URIS: http://elasticsearch:9200
+    ports:
+      - "8087:8087"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
 volumes:
   pgdata:
   rabbitdata:
+  esdata:

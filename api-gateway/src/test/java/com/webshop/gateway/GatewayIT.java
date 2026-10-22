@@ -65,7 +65,7 @@ class GatewayIT {
     @DynamicPropertySource
     static void routes(DynamicPropertyRegistry registry) {
         String url = "http://127.0.0.1:" + BACKEND.getAddress().getPort();
-        for (String svc : List.of("AUTH", "PRODUCT", "CART", "INVENTORY", "PAYMENT", "ORDER")) {
+        for (String svc : List.of("AUTH", "PRODUCT", "CART", "INVENTORY", "PAYMENT", "ORDER", "SEARCH")) {
             registry.add(svc + "_SERVICE_URL", () -> url);
         }
     }
@@ -93,6 +93,8 @@ class GatewayIT {
         client.get().uri("/api/products").header("X-Correlation-Id", "my-trace-123").exchange()
                 .expectHeader().valueEquals("X-Correlation-Id", "my-trace-123");
         assertThat(LAST_HEADERS.get("x-correlation-id")).isEqualTo("my-trace-123");
+
+        client.get().uri("/api/search/products?q=ban+phim").exchange().expectStatus().isOk();
     }
 
     @Test
