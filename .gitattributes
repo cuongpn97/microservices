@@ -1,0 +1,4 @@
+# Script shell và SQL phải giữ LF để chạy được trong container Linux / Git Bash.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.jar binary

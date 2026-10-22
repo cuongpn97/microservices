@@ -1,0 +1,128 @@
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # Gateway KHÔNG retry: retry là trách nhiệm của client (với Idempotency-Key) và của service gọi service.
+          # Retry ở nhiều tầng cùng lúc sẽ nhân số request (retry amplification).
+          httpclient:
+            connect-timeout: ${GATEWAY_CONNECT_TIMEOUT_MS:2000}
+            response-timeout: ${GATEWAY_RESPONSE_TIMEOUT:10s}
+          default-filters:
+            - name: RequestSize
+              args:
+                maxSize: ${GATEWAY_MAX_REQUEST_SIZE:1MB}
+          routes:
+            - id: auth
+              uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/auth/**
+            - id: products
+              uri: ${PRODUCT_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/products/**
+            - id: cart
+              uri: ${CART_SERVICE_URL:http://localhost:8083}
+              predicates:
+                - Path=/api/cart/**
+            - id: inventory
+              uri: ${INVENTORY_SERVICE_URL:http://localhost:8084}
+              predicates:
+                - Path=/api/inventory/**
+            - id: wallet
+              uri: ${PAYMENT_SERVICE_URL:http://localhost:8085}
+              predicates:
+                - Path=/api/wallet/**
+            - id: orders
+              uri: ${ORDER_SERVICE_URL:http://localhost:8086}
+              predicates:
+                - Path=/api/orders/**
+            # Tài liệu OpenAPI của từng service, phục vụ Swagger UI tổng hợp ở gateway (/swagger-ui.html).
+            - id: docs-auth
+              uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/docs/auth/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: docs-product
+              uri: ${PRODUCT_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/docs/product/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: docs-cart
+              uri: ${CART_SERVICE_URL:http://localhost:8083}
+              predicates:
+                - Path=/docs/cart/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: docs-inventory
+              uri: ${INVENTORY_SERVICE_URL:http://localhost:8084}
+              predicates:
+                - Path=/docs/inventory/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: docs-payment
+              uri: ${PAYMENT_SERVICE_URL:http://localhost:8085}
+              predicates:
+                - Path=/docs/payment/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: docs-order
+              uri: ${ORDER_SERVICE_URL:http://localhost:8086}
+              predicates:
+                - Path=/docs/order/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+
+# Swagger UI tổng hợp: dropdown chọn service; "Try it out" gọi qua gateway (server mặc định trong mỗi spec).
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    path: /swagger-ui.html
+    persist-authorization: true
+    urls-primary-name: order-service
+    urls:
+      - name: auth-service
+        url: /docs/auth/v3/api-docs
+      - name: product-service
+        url: /docs/product/v3/api-docs
+      - name: cart-service
+        url: /docs/cart/v3/api-docs
+      - name: inventory-service
+        url: /docs/inventory/v3/api-docs
+      - name: payment-service
+        url: /docs/payment/v3/api-docs
+      - name: order-service
+        url: /docs/order/v3/api-docs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,gateway
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+    gateway:
+      access: read-only
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+webshop:
+  security:
+    jwt:
+      secret: ${JWT_SECRET}
+      issuer: ${JWT_ISSUER:webshop-auth}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}

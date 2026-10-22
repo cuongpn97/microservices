@@ -1,0 +1,7 @@
+target/
+.env
+*.iml
+.idea/workspace.xml
+.idea/shelf/
+*.log
+.gstack/

@@ -1,0 +1,25 @@
+spring:
+  flyway:
+    locations: classpath:db/messaging-test
+  rabbitmq:
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        default-requeue-rejected: false
+
+webshop:
+  messaging:
+    retry:
+      max-attempts: 3
+      initial-delay: 50ms
+      multiplier: 2
+      max-delay: 200ms
+      jitter-factor: 0.2
+    outbox:
+      scheduling-enabled: false
+      initial-backoff: 1s
+      max-backoff: 10s

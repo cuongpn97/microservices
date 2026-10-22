@@ -1,0 +1,2 @@
+com.webshop.common.CommonWebAutoConfiguration
+com.webshop.common.openapi.OpenApiConfig

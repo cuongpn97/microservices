@@ -1,0 +1,110 @@
+server:
+  port: ${SERVER_PORT:8086}
+  shutdown: graceful
+
+spring:
+  application:
+    name: order-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/order_db}
+    username: ${DB_USERNAME:order_user}
+    password: ${DB_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      # Nạp items của nhiều Order bằng một câu IN (...) thay vì một SELECT mỗi đơn (chống N+1 ở GET /api/orders).
+      # Không dùng JOIN FETCH: đi cùng Pageable, Hibernate sẽ phân trang trong RAM (HHH90003004).
+      hibernate.default_batch_fetch_size: 50
+  flyway:
+    enabled: true
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:webshop}
+    password: ${RABBITMQ_PASSWORD}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 10
+        default-requeue-rejected: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,circuitbreakers
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  health:
+    circuitbreakers:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+webshop:
+  security:
+    jwt:
+      secret: ${JWT_SECRET}
+      issuer: ${JWT_ISSUER:webshop-auth}
+  services:
+    cart-url: ${CART_SERVICE_URL:http://localhost:8083}
+    product-url: ${PRODUCT_SERVICE_URL:http://localhost:8082}
+  http:
+    retry:
+      max-attempts: ${HTTP_RETRY_MAX_ATTEMPTS:3}
+      initial-delay: ${HTTP_RETRY_INITIAL_DELAY:100ms}
+      multiplier: 2
+      max-delay: 1s
+      jitter-factor: 0.5
+      connect-timeout: ${HTTP_CONNECT_TIMEOUT:1s}
+      read-timeout: ${HTTP_READ_TIMEOUT:2s}
+  messaging:
+    retry:
+      max-attempts: ${MESSAGE_RETRY_MAX_ATTEMPTS:4}
+      initial-delay: ${MESSAGE_RETRY_INITIAL_DELAY:1s}
+      multiplier: ${MESSAGE_RETRY_MULTIPLIER:3}
+      max-delay: ${MESSAGE_RETRY_MAX_DELAY:30s}
+  saga:
+    # Thời gian chờ reply cho một bước; quá hạn → gửi lại command (cùng khóa idempotency) với backoff.
+    step-timeout: ${SAGA_STEP_TIMEOUT:15s}
+    max-step-timeout: ${SAGA_MAX_STEP_TIMEOUT:2m}
+    # Số lần gửi command GIỮ CHỖ trước khi bỏ cuộc và bồi hoàn.
+    max-reserve-attempts: ${SAGA_MAX_RESERVE_ATTEMPTS:3}
+    # Bước không thể bỏ cuộc (confirm/compensate) vẫn retry mãi, nhưng sau ngưỡng này bật cờ needs_attention.
+    attention-threshold: ${SAGA_ATTENTION_THRESHOLD:5}
+    watcher-interval-ms: ${SAGA_WATCHER_INTERVAL_MS:2000}
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 2s
+        slow-call-rate-threshold: 80
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        register-health-indicator: true
+        record-exceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - org.springframework.web.client.HttpServerErrorException
+        ignore-exceptions:
+          - org.springframework.web.client.HttpClientErrorException
+    instances:
+      cart-service:
+        base-config: default
+      product-service:
+        base-config: default

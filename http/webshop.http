@@ -1,0 +1,92 @@
+### Bộ request cho IntelliJ HTTP Client / VS Code REST Client (biến lưu giữa các request bằng client.global).
+@gateway = http://localhost:8080
+@keyboard = 11111111-1111-1111-1111-111111111111
+@mouse = 22222222-2222-2222-2222-222222222222
+@laptop = 44444444-4444-4444-4444-444444444444
+
+### 1. Đăng ký (đổi email mỗi lần chạy)
+POST {{gateway}}/api/auth/register
+Content-Type: application/json
+
+{"email": "alice-{{$random.uuid}}@example.com", "password": "alice-password-1", "fullName": "Alice"}
+
+> {% client.global.set("email", response.body.email); %}
+
+### 2. Đăng nhập
+POST {{gateway}}/api/auth/login
+Content-Type: application/json
+
+{"email": "{{email}}", "password": "alice-password-1"}
+
+> {% client.global.set("token", response.body.accessToken); %}
+
+### 3. Ví (có thể 404 WALLET_NOT_INITIALIZED trong ~1 giây đầu)
+GET {{gateway}}/api/wallet/me
+Authorization: Bearer {{token}}
+
+### 4. Sản phẩm (public)
+GET {{gateway}}/api/products
+
+### 5. Tồn kho (public)
+GET {{gateway}}/api/inventory/{{keyboard}}
+
+### 6. Thêm vào giỏ
+POST {{gateway}}/api/cart/items
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"productId": "{{keyboard}}", "quantity": 2}
+
+### 7. Thêm chuột
+POST {{gateway}}/api/cart/items
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"productId": "{{mouse}}", "quantity": 1}
+
+### 8. Xem giỏ
+GET {{gateway}}/api/cart
+Authorization: Bearer {{token}}
+
+### 9. Checkout (gửi lại request này với cùng key → cùng orderId, HTTP 200)
+POST {{gateway}}/api/orders/checkout
+Authorization: Bearer {{token}}
+Idempotency-Key: checkout-demo-{{email}}
+
+> {% client.global.set("orderId", response.body.orderId); %}
+
+### 10. Poll trạng thái đơn
+GET {{gateway}}/api/orders/{{orderId}}
+Authorization: Bearer {{token}}
+
+### 11. Lịch sử ledger
+GET {{gateway}}/api/wallet/me/ledger
+Authorization: Bearer {{token}}
+
+### 12. Checkout không token → 401
+POST {{gateway}}/api/orders/checkout
+Idempotency-Key: anonymous-attempt-1
+
+### ---------------- ADMIN ----------------
+### 13. Đăng nhập admin (ADMIN_EMAIL / ADMIN_PASSWORD trong .env)
+POST {{gateway}}/api/auth/login
+Content-Type: application/json
+
+{"email": "admin@webshop.local", "password": "local-only-admin-pw"}
+
+> {% client.global.set("admin", response.body.accessToken); %}
+
+### 14. Đặt tồn kho
+PUT {{gateway}}/api/inventory/{{mouse}}
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{"stockOnHand": 200}
+
+### 15. Chi tiết Saga (gọi thẳng order-service)
+GET http://localhost:8086/admin/sagas/{{orderId}}
+Authorization: Bearer {{admin}}
+
+### 16. DLQ của payment-service
+GET http://localhost:8085/admin/dlq
+Authorization: Bearer {{admin}}
