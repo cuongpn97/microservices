@@ -19,9 +19,7 @@ import org.springframework.amqp.rabbit.support.MessagePropertiesConverter;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
@@ -80,10 +78,10 @@ public class DlqService {
     }
 
     /** Xem tối đa {@code max} message đầu DLQ mà không lấy chúng ra (get rồi nack requeue=true). */
-    public List<Map<String, Object>> peek(String dlq, int max) {
+    public List<DlqMessage> peek(String dlq, int max) {
         requireOwned(dlq);
         return rabbitTemplate.execute(channel -> {
-            List<Map<String, Object>> result = new ArrayList<>();
+            List<DlqMessage> result = new ArrayList<>();
             List<Long> tags = new ArrayList<>();
             for (int i = 0; i < max; i++) {
                 GetResponse response = channel.basicGet(dlq, false);
@@ -93,18 +91,17 @@ public class DlqService {
                 tags.add(response.getEnvelope().getDeliveryTag());
                 MessageProperties props = converter.toMessageProperties(response.getProps(),
                         response.getEnvelope(), "UTF-8");
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("messageId", props.getMessageId());
-                item.put("correlationId", props.getCorrelationId());
-                item.put("eventType", props.getHeader(MessageHeaders.EVENT_TYPE));
-                item.put("originalRoutingKey", props.getHeader(MessageHeaders.ORIGINAL_ROUTING_KEY));
-                item.put("attempt", props.getHeader(MessageHeaders.ATTEMPT));
-                item.put("failureReason", props.getHeader(MessageHeaders.FAILURE_REASON));
-                item.put("lastError", props.getHeader(MessageHeaders.LAST_ERROR));
-                item.put("failedAt", props.getHeader(MessageHeaders.FAILED_AT));
-                item.put("redriveCount", props.getHeader(MessageHeaders.REDRIVE_COUNT));
-                item.put("body", new String(response.getBody(), StandardCharsets.UTF_8));
-                result.add(item);
+                result.add(new DlqMessage(
+                        props.getMessageId(),
+                        props.getCorrelationId(),
+                        stringHeader(props, MessageHeaders.EVENT_TYPE),
+                        stringHeader(props, MessageHeaders.ORIGINAL_ROUTING_KEY),
+                        intHeader(props, MessageHeaders.ATTEMPT),
+                        stringHeader(props, MessageHeaders.FAILURE_REASON),
+                        stringHeader(props, MessageHeaders.LAST_ERROR),
+                        stringHeader(props, MessageHeaders.FAILED_AT),
+                        intHeader(props, MessageHeaders.REDRIVE_COUNT),
+                        new String(response.getBody(), StandardCharsets.UTF_8)));
             }
             for (Long tag : tags) {
                 channel.basicNack(tag, false, true);
@@ -154,6 +151,16 @@ public class DlqService {
         });
         log.info("Redrove {} message(s) from {} to {}", moved, dlq, targetQueue);
         return moved != null ? moved : 0;
+    }
+
+    /** Header AMQP là Object; toString() an toàn cho mọi kiểu chuỗi broker trả về. */
+    private static String stringHeader(MessageProperties props, String name) {
+        Object value = props.getHeader(name);
+        return value == null ? null : value.toString();
+    }
+
+    private static Integer intHeader(MessageProperties props, String name) {
+        return props.getHeader(name) instanceof Number n ? n.intValue() : null;
     }
 
     private void requireOwned(String dlq) {

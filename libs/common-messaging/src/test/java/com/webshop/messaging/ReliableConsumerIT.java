@@ -1,6 +1,7 @@
 package com.webshop.messaging;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.webshop.messaging.dlq.DlqMessage;
 import com.webshop.messaging.dlq.DlqService;
 import com.webshop.messaging.testapp.MessagingTestApplication;
 import com.webshop.messaging.testapp.TestHandler;
@@ -77,12 +78,12 @@ class ReliableConsumerIT extends AbstractMessagingIT {
         await().atMost(Duration.ofSeconds(15)).until(() -> dlqService.depth(DLQ) == 1);
         // max-attempts = 3 trong application-messaging-test.yml: lần đầu + 2 lần retry, không hơn.
         assertThat(handler.invocations(eventId)).isEqualTo(3);
-        Map<String, Object> dead = dlqService.peek(DLQ, 1).getFirst();
-        assertThat(dead.get("messageId")).isEqualTo(eventId.toString());
-        assertThat(dead.get("failureReason")).isEqualTo("RETRIES_EXHAUSTED");
-        assertThat(dead.get("originalRoutingKey")).isEqualTo("test.created");
-        assertThat(((Number) dead.get("attempt")).intValue()).isEqualTo(3);
-        assertThat((String) dead.get("lastError")).contains("simulated transient failure");
+        DlqMessage dead = dlqService.peek(DLQ, 1).getFirst();
+        assertThat(dead.messageId()).isEqualTo(eventId.toString());
+        assertThat(dead.failureReason()).isEqualTo("RETRIES_EXHAUSTED");
+        assertThat(dead.originalRoutingKey()).isEqualTo("test.created");
+        assertThat(dead.attempt()).isEqualTo(3);
+        assertThat(dead.lastError()).contains("simulated transient failure");
         // Không có hiệu ứng nào được commit cho message thất bại.
         Integer inboxRows = jdbc.queryForObject(
                 "SELECT count(*) FROM processed_message WHERE message_id = ?", Integer.class, eventId);
@@ -98,7 +99,7 @@ class ReliableConsumerIT extends AbstractMessagingIT {
 
         await().atMost(Duration.ofSeconds(10)).until(() -> dlqService.depth(DLQ) == 1);
         assertThat(handler.invocations(eventId)).isEqualTo(1);
-        assertThat(dlqService.peek(DLQ, 1).getFirst().get("failureReason")).isEqualTo("PERMANENT");
+        assertThat(dlqService.peek(DLQ, 1).getFirst().failureReason()).isEqualTo("PERMANENT");
     }
 
     @Test
@@ -110,7 +111,7 @@ class ReliableConsumerIT extends AbstractMessagingIT {
         rabbitTemplate.send("webshop.events", "test.created", garbage);
 
         await().atMost(Duration.ofSeconds(10)).until(() -> dlqService.depth(DLQ) == 1);
-        assertThat(dlqService.peek(DLQ, 1).getFirst().get("failureReason")).isEqualTo("UNPARSEABLE");
+        assertThat(dlqService.peek(DLQ, 1).getFirst().failureReason()).isEqualTo("UNPARSEABLE");
     }
 
     @Test

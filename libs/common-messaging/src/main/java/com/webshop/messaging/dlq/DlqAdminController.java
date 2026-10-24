@@ -26,6 +26,10 @@ public class DlqAdminController {
         this.dlqService = dlqService;
     }
 
+    /**
+     * Tên DLQ → số message đang nằm trong đó. Giữ Map ở đây là đúng: key là tên queue (khác nhau theo service),
+     * không phải một tập field cố định để khai báo thành record.
+     */
     @GetMapping
     public Map<String, Long> depths() {
         Map<String, Long> result = new LinkedHashMap<>();
@@ -36,7 +40,7 @@ public class DlqAdminController {
     }
 
     @GetMapping("/{dlq}/messages")
-    public List<Map<String, Object>> peek(@PathVariable String dlq, @RequestParam(defaultValue = "10") int max) {
+    public List<DlqMessage> peek(@PathVariable String dlq, @RequestParam(defaultValue = "10") int max) {
         try {
             return dlqService.peek(dlq, Math.min(max, 100));
         } catch (IllegalArgumentException e) {
@@ -45,10 +49,10 @@ public class DlqAdminController {
     }
 
     @PostMapping("/{dlq}/redrive")
-    public Map<String, Object> redrive(@PathVariable String dlq, @RequestParam(defaultValue = "10") int max) {
+    public RedriveResult redrive(@PathVariable String dlq, @RequestParam(defaultValue = "10") int max) {
         try {
             int moved = dlqService.redrive(dlq, Math.min(max, 1000));
-            return Map.of("dlq", dlq, "redriven", moved);
+            return new RedriveResult(dlq, moved);
         } catch (IllegalArgumentException e) {
             throw ApiException.notFound("DLQ_NOT_FOUND", e.getMessage());
         }
