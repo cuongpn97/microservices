@@ -1,16 +1,26 @@
-package com.webshop.product;
+package com.webshop.product.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Chỉ dùng @Getter, KHÔNG dùng @Data/@Setter cho entity:
+ * - @Data sinh equals/hashCode theo mọi field → lỗi với Hibernate proxy và collection lazy.
+ * - Không có setter → chỉ đổi được dữ liệu qua constructor/update(), luôn cập nhật updatedAt.
+ */
 @Entity
 @Table(name = "products")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED) // JPA cần constructor rỗng, code ứng dụng thì không được dùng
 public class Product {
 
     @Id
@@ -38,9 +48,6 @@ public class Product {
     @Version
     private long version;
 
-    protected Product() {
-    }
-
     public Product(UUID id, String name, String description, long priceVnd, boolean active, Instant now) {
         this.id = id;
         this.name = name;
@@ -57,33 +64,5 @@ public class Product {
         this.priceVnd = priceVnd;
         this.active = active;
         this.updatedAt = now;
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public long getPriceVnd() {
-        return priceVnd;
-    }
-
-    public boolean isActive() {
-        return active;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public long getVersion() {
-        return version;
     }
 }

@@ -1,4 +1,4 @@
-package com.webshop.product;
+package com.webshop.product.config;
 
 import com.webshop.common.openapi.OpenApiConfig;
 import com.webshop.common.security.WebshopJwt;
@@ -9,8 +9,6 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
-
-import java.time.Clock;
 
 @Configuration
 @EnableMethodSecurity
@@ -31,10 +29,5 @@ public class SecurityConfig {
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt ->
                         jwt.jwtAuthenticationConverter(WebshopJwt.authenticationConverter())));
         return http.build();
-    }
-
-    @Bean
-    public Clock clock() {
-        return Clock.systemUTC();
     }
 }

@@ -43,6 +43,9 @@
         <resilience4j.version>2.3.0</resilience4j.version>
         <!-- springdoc 2.8.x là dòng dành cho Spring Boot 3.5 (3.x dành cho Boot 4) -->
         <springdoc.version>2.8.17</springdoc.version>
+        <!-- lombok.version đã được Spring Boot BOM quản lý; MapStruct thì không, nên phải pin ở đây -->
+        <mapstruct.version>1.6.3</mapstruct.version>
+        <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
     </properties>
 
     <dependencyManagement>
@@ -72,6 +75,11 @@
                 <version>${springdoc.version}</version>
             </dependency>
             <dependency>
+                <groupId>org.mapstruct</groupId>
+                <artifactId>mapstruct</artifactId>
+                <version>${mapstruct.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>com.webshop</groupId>
                 <artifactId>common-web</artifactId>
                 <version>${project.version}</version>
@@ -94,6 +102,34 @@
     <build>
         <pluginManagement>
             <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <configuration>
+                        <!--
+                          Lombok sinh getter/constructor TRƯỚC, MapStruct mới đọc được getter đó để sinh mapper.
+                          lombok-mapstruct-binding đảm bảo đúng thứ tự này. Module không dùng Lombok/MapStruct
+                          vẫn compile bình thường (processor không tìm thấy annotation thì không làm gì).
+                        -->
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                                <version>${lombok.version}</version>
+                            </path>
+                            <path>
+                                <groupId>org.mapstruct</groupId>
+                                <artifactId>mapstruct-processor</artifactId>
+                                <version>${mapstruct.version}</version>
+                            </path>
+                            <path>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok-mapstruct-binding</artifactId>
+                                <version>${lombok-mapstruct-binding.version}</version>
+                            </path>
+                        </annotationProcessorPaths>
+                    </configuration>
+                </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
