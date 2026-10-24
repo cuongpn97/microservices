@@ -1,6 +1,6 @@
 package com.webshop.cart.client;
 
-import com.webshop.cart.client.ProductClient.ProductInfo;
+import com.webshop.cart.client.dto.ProductInfo;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.service.annotation.GetExchange;

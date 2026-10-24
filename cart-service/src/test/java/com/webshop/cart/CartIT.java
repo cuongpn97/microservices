@@ -2,7 +2,7 @@ package com.webshop.cart;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.webshop.cart.client.ProductClient;
-import com.webshop.cart.client.ProductClient.ProductInfo;
+import com.webshop.cart.client.dto.ProductInfo;
 import com.webshop.common.http.DependencyUnavailableException;
 import com.webshop.messaging.EventEnvelope;
 import com.webshop.messaging.RoutingKeys;

@@ -235,8 +235,8 @@ stateDiagram-v2
 ```
 
 Ý nghĩa chính xác từng state nằm trong Javadoc của
-[`SagaState`](../order-service/src/main/java/com/webshop/order/saga/SagaState.java); logic chuyển trạng thái ở
-[`CheckoutSaga`](../order-service/src/main/java/com/webshop/order/saga/CheckoutSaga.java) (thuần Java, unit test trong
+[`SagaState`](../order-service/src/main/java/com/webshop/order/enums/SagaState.java); logic chuyển trạng thái ở
+[`CheckoutSaga`](../order-service/src/main/java/com/webshop/order/entity/CheckoutSaga.java) (thuần Java, unit test trong
 `CheckoutSagaTest`).
 
 ## 5. Saga bồi hoàn (compensation)

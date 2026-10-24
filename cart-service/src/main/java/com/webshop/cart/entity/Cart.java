@@ -1,4 +1,4 @@
-package com.webshop.cart.domain;
+package com.webshop.cart.entity;
 
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
@@ -9,6 +9,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.MapKeyColumn;
 import jakarta.persistence.Table;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 import java.util.Collections;
@@ -16,8 +19,14 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Giỏ hàng của một user (id = userId). revision tăng mỗi lần giỏ thay đổi — Order Service lưu revision lúc checkout
+ * để chặn checkout hai lần cùng một phiên bản giỏ.
+ */
 @Entity
 @Table(name = "cart")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Cart {
 
     public static final int MAX_DISTINCT_ITEMS = 50;
@@ -37,10 +46,8 @@ public class Cart {
     @CollectionTable(name = "cart_item", joinColumns = @JoinColumn(name = "user_id"))
     @MapKeyColumn(name = "product_id")
     @Column(name = "quantity")
+    @Getter(AccessLevel.NONE) // tự viết getItems() bên dưới: trả bản chỉ-đọc, mọi thay đổi phải qua add/set/remove
     private Map<UUID, Integer> items = new HashMap<>();
-
-    protected Cart() {
-    }
 
     public Cart(UUID userId, Instant now) {
         this.userId = userId;
@@ -111,18 +118,6 @@ public class Cart {
         if (quantity <= 0) {
             throw new IllegalArgumentException("quantity must be positive");
         }
-    }
-
-    public UUID getUserId() {
-        return userId;
-    }
-
-    public long getRevision() {
-        return revision;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
     }
 
     public Map<UUID, Integer> getItems() {

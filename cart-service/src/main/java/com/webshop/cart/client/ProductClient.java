@@ -1,6 +1,8 @@
 package com.webshop.cart.client;
 
+import com.webshop.cart.client.dto.ProductInfo;
 import com.webshop.common.http.ResilientCaller;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 
@@ -14,17 +16,13 @@ import java.util.UUID;
  * Việc gọi HTTP do {@link ProductApi} (HTTP Interface) đảm nhiệm; lớp này giữ resilience và ngữ nghĩa nghiệp vụ (404 → empty).
  */
 @Component
+@RequiredArgsConstructor
 public class ProductClient {
 
     private static final String DEPENDENCY = "product-service";
 
     private final ProductApi api;
     private final ResilientCaller resilience;
-
-    public ProductClient(ProductApi api, ResilientCaller resilience) {
-        this.api = api;
-        this.resilience = resilience;
-    }
 
     public Optional<ProductInfo> find(UUID productId) {
         return resilience.idempotent(DEPENDENCY, () -> {
@@ -41,8 +39,5 @@ public class ProductClient {
             return List.of();
         }
         return resilience.idempotent(DEPENDENCY, () -> api.findAll(ids));
-    }
-
-    public record ProductInfo(UUID id, String name, long priceVnd, boolean active) {
     }
 }
