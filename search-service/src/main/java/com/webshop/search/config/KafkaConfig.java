@@ -1,6 +1,6 @@
 package com.webshop.search.config;
 
-import com.webshop.search.cdc.MalformedChangeEventException;
+import com.webshop.search.exception.MalformedChangeEventException;
 import org.apache.kafka.common.TopicPartition;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

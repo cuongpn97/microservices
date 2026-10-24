@@ -1,4 +1,4 @@
-package com.webshop.search.cdc;
+package com.webshop.search.exception;
 
 /** Message CDC không đọc được (JSON hỏng, thiếu trường bắt buộc). Retry vô ích → đi thẳng DLT. */
 public class MalformedChangeEventException extends RuntimeException {

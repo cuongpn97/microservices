@@ -2,7 +2,7 @@ package com.webshop.search;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import com.webshop.search.config.SearchProperties;
-import com.webshop.search.index.ProductIndexBootstrap;
+import com.webshop.search.config.ProductIndexBootstrap;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;

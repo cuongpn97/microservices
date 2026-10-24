@@ -1,4 +1,4 @@
-package com.webshop.search.query;
+package com.webshop.search.repository;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.SortOptions;
@@ -10,24 +10,29 @@ import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import com.webshop.common.http.DependencyUnavailableException;
 import com.webshop.search.config.SearchProperties;
-import org.springframework.stereotype.Service;
+import com.webshop.search.dto.request.SearchQuery;
+import com.webshop.search.entity.ProductSearchHit;
+import com.webshop.search.entity.ProductSearchPage;
+import com.webshop.search.enums.SearchSort;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Repository;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
-@Service
-public class ProductSearchService {
+/**
+ * Đọc từ index Elasticsearch (phía ĐỌC của read model). Toàn bộ query DSL nằm ở đây.
+ * Luôn đọc qua ALIAS (không phải index thật) để việc dựng lại index ở phía sau không ảnh hưởng người dùng.
+ */
+@Repository
+@RequiredArgsConstructor
+public class ProductSearchRepository {
 
-    private final ElasticsearchClient client;
-    private final SearchProperties props;
+    private final ElasticsearchClient elasticsearchClient;
+    private final SearchProperties searchProperties;
 
-    public ProductSearchService(ElasticsearchClient client, SearchProperties props) {
-        this.client = client;
-        this.props = props;
-    }
-
-    public SearchResult search(SearchQuery query) {
+    public ProductSearchPage search(SearchQuery query) {
         BoolQuery.Builder bool = new BoolQuery.Builder()
                 // Document có thể chỉ có cờ deleted (event delete tới khi index chưa có sản phẩm, ví dụ index dựng lại
                 // từ topic đã compact một phần) → không có name, không hiển thị.
@@ -61,23 +66,23 @@ public class ProductSearchService {
         }
 
         try {
-            SearchResponse<Map> response = client.search(s -> s
-                    .index(props.indexAlias())
+            SearchResponse<Map> response = elasticsearchClient.search(s -> s
+                    .index(searchProperties.indexAlias())
                     .query(q -> q.bool(bool.build()))
                     .sort(sort(query.sort(), query.hasText()))
                     .from(query.page() * query.size())
                     .size(query.size())
                     .trackTotalHits(t -> t.enabled(true)), Map.class);
-            List<ProductHit> items = response.hits().hits().stream().map(ProductSearchService::toHit).toList();
-            long total = response.hits().total() == null ? items.size() : response.hits().total().value();
-            return new SearchResult(items, query.page(), query.size(), total, response.took());
+            List<ProductSearchHit> hits = response.hits().hits().stream().map(ProductSearchRepository::toHit).toList();
+            long total = response.hits().total() == null ? hits.size() : response.hits().total().value();
+            return new ProductSearchPage(hits, total, response.took());
         } catch (IOException e) {
             // Không kết nối được (ES down, timeout) → 503. Lỗi 4xx từ ES là bug truy vấn → để lọt ra thành 500.
             throw new DependencyUnavailableException("elasticsearch", e.getMessage(), e);
         }
     }
 
-    private static List<SortOptions> sort(SearchQuery.Sort sort, boolean hasText) {
+    private static List<SortOptions> sort(SearchSort sort, boolean hasText) {
         SortOptions byName = SortOptions.of(o -> o.field(f -> f.field("name.sort").order(SortOrder.Asc)));
         return switch (sort) {
             case PRICE_ASC -> List.of(SortOptions.of(o -> o.field(f -> f.field("priceVnd").order(SortOrder.Asc))),
@@ -92,17 +97,10 @@ public class ProductSearchService {
     }
 
     @SuppressWarnings("unchecked")
-    private static ProductHit toHit(Hit<Map> hit) {
+    private static ProductSearchHit toHit(Hit<Map> hit) {
         Map<String, Object> src = hit.source() == null ? Map.of() : hit.source();
         Number price = (Number) src.get("priceVnd");
-        return new ProductHit(hit.id(), (String) src.get("name"), (String) src.get("description"),
+        return new ProductSearchHit(hit.id(), (String) src.get("name"), (String) src.get("description"),
                 price == null ? 0 : price.longValue(), hit.score());
-    }
-
-    /** Không có tồn kho: lấy số thật từ GET /api/inventory/batch cho các sản phẩm đang hiển thị. */
-    public record ProductHit(String productId, String name, String description, long priceVnd, Double score) {
-    }
-
-    public record SearchResult(List<ProductHit> items, int page, int size, long totalElements, long tookMs) {
     }
 }

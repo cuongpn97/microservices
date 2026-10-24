@@ -1,10 +1,8 @@
-package com.webshop.search.index;
+package com.webshop.search.config;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.ElasticsearchException;
-import com.webshop.search.config.SearchProperties;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.io.ClassPathResource;
@@ -24,13 +22,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       index cũ → người dùng vẫn tìm được đầy đủ. Khi listener báo idle (đã đọc hết topic) mới chuyển alias, nguyên tử.</li>
  *   <li>Chưa có alias (cài mới): gắn alias ngay — không có gì để bảo vệ.</li>
  * </ul>
- * Chạy TRƯỚC Kafka listener ({@link ProductIndexer} phụ thuộc bean này): nếu listener ghi trước, Elasticsearch tự tạo
+ * Chạy TRƯỚC Kafka listener ({@link com.webshop.search.repository.ProductIndexRepository}
+ * phụ thuộc bean này): nếu listener ghi trước, Elasticsearch tự tạo
  * index với dynamic mapping (sai analyzer, sai kiểu).
  */
+@Slf4j
 @Component
 public class ProductIndexBootstrap implements InitializingBean {
-
-    private static final Logger log = LoggerFactory.getLogger(ProductIndexBootstrap.class);
 
     private final ElasticsearchClient client;
     private final SearchProperties props;
@@ -59,7 +57,7 @@ public class ProductIndexBootstrap implements InitializingBean {
     /**
      * Listener không còn record nào để đọc → index mới đã bắt kịp topic → chuyển alias (một lần).
      * Chỉ đúng khi consumer group là group MỚI (đọc từ đầu topic): nếu group đã có offset, "idle" chỉ nghĩa là không có
-     * thay đổi mới, và alias sẽ chuyển sang một index rỗng — xem CdcListeners (idIsGroup = false).
+     * thay đổi mới, và alias sẽ chuyển sang một index rỗng — xem ProductCdcListener (idIsGroup = false).
      */
     @EventListener
     public void onListenerIdle(ListenerContainerIdleEvent event) throws IOException {

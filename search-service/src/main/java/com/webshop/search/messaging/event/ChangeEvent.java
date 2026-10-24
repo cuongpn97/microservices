@@ -1,7 +1,8 @@
-package com.webshop.search.cdc;
+package com.webshop.search.messaging.event;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.webshop.search.exception.MalformedChangeEventException;
 
 /**
  * Một bản ghi thay đổi của Debezium (JsonConverter, schemas.enable=false):
