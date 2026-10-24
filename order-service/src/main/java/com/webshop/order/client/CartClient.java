@@ -2,13 +2,11 @@ package com.webshop.order.client;
 
 import com.webshop.common.http.ResilientCaller;
 import com.webshop.common.http.RestClientFactory;
+import com.webshop.order.client.dto.CartSnapshot;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
-
-import java.util.List;
-import java.util.UUID;
 
 /**
  * Đọc giỏ hàng của user bằng cách CHUYỂN TIẾP access token của chính user đó.
@@ -35,10 +33,5 @@ public class CartClient {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + bearerToken)
                 .retrieve()
                 .body(CartSnapshot.class));
-    }
-
-    public record CartSnapshot(UUID userId, long revision, List<Line> items) {
-        public record Line(UUID productId, int quantity) {
-        }
     }
 }

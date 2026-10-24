@@ -2,6 +2,7 @@ package com.webshop.order.client;
 
 import com.webshop.common.http.ResilientCaller;
 import com.webshop.common.http.RestClientFactory;
+import com.webshop.order.client.dto.ProductInfo;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
@@ -32,8 +33,5 @@ public class ProductClient {
                 .retrieve()
                 .body(new ParameterizedTypeReference<List<ProductInfo>>() {
                 }));
-    }
-
-    public record ProductInfo(UUID id, String name, long priceVnd, boolean active) {
     }
 }
