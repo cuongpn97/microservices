@@ -1,7 +1,11 @@
-package com.webshop.auth.token;
+package com.webshop.auth.service.impl;
 
-import com.webshop.auth.user.User;
+import com.webshop.auth.config.TokenProperties;
+import com.webshop.auth.dto.response.TokenResponse;
+import com.webshop.auth.entity.User;
+import com.webshop.auth.service.TokenService;
 import com.webshop.common.security.WebshopJwt;
+import lombok.RequiredArgsConstructor;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
@@ -17,33 +21,27 @@ import java.time.Instant;
  * Không có refresh token trong phạm vi bài học (xem "Known gaps" trong README).
  */
 @Service
-public class TokenService {
+@RequiredArgsConstructor
+public class TokenServiceImpl implements TokenService {
 
-    private final JwtEncoder encoder;
-    private final TokenProperties properties;
+    private final JwtEncoder jwtEncoder;
+    private final TokenProperties tokenProperties;
     private final Clock clock;
 
-    public TokenService(JwtEncoder encoder, TokenProperties properties, Clock clock) {
-        this.encoder = encoder;
-        this.properties = properties;
-        this.clock = clock;
-    }
-
-    public IssuedToken issue(User user) {
+    @Override
+    public TokenResponse issue(User user) {
         Instant now = clock.instant();
-        Instant expiresAt = now.plus(properties.accessTokenTtl());
+        Instant expiresAt = now.plus(tokenProperties.accessTokenTtl());
         JwtClaimsSet claims = JwtClaimsSet.builder()
-                .issuer(properties.issuer())
+                .issuer(tokenProperties.issuer())
                 .subject(user.getId().toString())
                 .issuedAt(now)
                 .expiresAt(expiresAt)
                 .claim(WebshopJwt.ROLES_CLAIM, user.getRoles())
                 .build();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
-        String token = encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
-        return new IssuedToken(token, properties.accessTokenTtl().toSeconds(), expiresAt);
-    }
-
-    public record IssuedToken(String value, long expiresInSeconds, Instant expiresAt) {
+        String token = jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+        return new TokenResponse(token, "Bearer", tokenProperties.accessTokenTtl().toSeconds(), expiresAt,
+                user.getId(), user.getRoles());
     }
 }

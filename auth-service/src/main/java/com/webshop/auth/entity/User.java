@@ -1,9 +1,12 @@
-package com.webshop.auth.user;
+package com.webshop.auth.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 import java.util.Arrays;
@@ -12,6 +15,8 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "users")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class User {
 
     @Id
@@ -29,13 +34,11 @@ public class User {
 
     /** Danh sách role phân tách bằng dấu phẩy, ví dụ "USER" hoặc "USER,ADMIN". */
     @Column(nullable = false)
+    @Getter(AccessLevel.NONE) // tự viết getRoles() bên dưới để trả List thay vì chuỗi thô
     private String roles;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
-
-    protected User() {
-    }
 
     public User(UUID id, String email, String passwordHash, String fullName, List<String> roles, Instant createdAt) {
         this.id = id;
@@ -46,27 +49,7 @@ public class User {
         this.createdAt = createdAt;
     }
 
-    public UUID getId() {
-        return id;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public String getPasswordHash() {
-        return passwordHash;
-    }
-
-    public String getFullName() {
-        return fullName;
-    }
-
     public List<String> getRoles() {
         return Arrays.stream(roles.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList();
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
     }
 }

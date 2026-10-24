@@ -1,4 +1,4 @@
-package com.webshop.auth.token;
+package com.webshop.auth.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
