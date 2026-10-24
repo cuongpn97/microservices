@@ -1,16 +1,25 @@
-package com.webshop.inventory.domain;
+package com.webshop.inventory.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Tồn kho của một sản phẩm. Không có setter: mọi thay đổi số lượng đi qua reserve/commit/release/setStockOnHand,
+ * mỗi method tự kiểm tra bất biến (không âm, không thấp hơn lượng đang giữ chỗ).
+ */
 @Entity
 @Table(name = "inventory_item")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class InventoryItem {
 
     @Id
@@ -28,9 +37,6 @@ public class InventoryItem {
 
     @Version
     private long version;
-
-    protected InventoryItem() {
-    }
 
     public InventoryItem(UUID productId, int stockOnHand, Instant now) {
         if (stockOnHand < 0) {
@@ -85,21 +91,5 @@ public class InventoryItem {
         }
         stockOnHand = newStock;
         updatedAt = now;
-    }
-
-    public UUID getProductId() {
-        return productId;
-    }
-
-    public int getStockOnHand() {
-        return stockOnHand;
-    }
-
-    public int getReservedQuantity() {
-        return reservedQuantity;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
     }
 }

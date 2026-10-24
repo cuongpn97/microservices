@@ -1,13 +1,20 @@
-package com.webshop.inventory.application;
+package com.webshop.inventory.service.impl;
 
 import com.webshop.common.web.ApiException;
-import com.webshop.inventory.domain.InventoryItem;
-import com.webshop.inventory.domain.InventoryItemRepository;
-import com.webshop.inventory.domain.Reservation;
-import com.webshop.inventory.domain.ReservationRepository;
-import com.webshop.inventory.domain.ReservationStatus;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.webshop.inventory.dto.ReservationLineDto;
+import com.webshop.inventory.dto.ReservationOutcome;
+import com.webshop.inventory.dto.response.ReservationResponse;
+import com.webshop.inventory.dto.response.StockResponse;
+import com.webshop.inventory.entity.InventoryItem;
+import com.webshop.inventory.entity.Reservation;
+import com.webshop.inventory.entity.ReservationLine;
+import com.webshop.inventory.enums.ReservationStatus;
+import com.webshop.inventory.mapper.InventoryMapper;
+import com.webshop.inventory.repository.InventoryItemRepository;
+import com.webshop.inventory.repository.ReservationRepository;
+import com.webshop.inventory.service.InventoryService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,14 +27,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.ObjIntConsumer;
 import java.util.stream.Collectors;
 
-import static com.webshop.inventory.application.ReservationOutcome.COMMITTED;
-import static com.webshop.inventory.application.ReservationOutcome.COMMIT_REJECTED;
-import static com.webshop.inventory.application.ReservationOutcome.RELEASED;
-import static com.webshop.inventory.application.ReservationOutcome.RELEASE_REJECTED;
-import static com.webshop.inventory.application.ReservationOutcome.RESERVATION_REJECTED;
-import static com.webshop.inventory.application.ReservationOutcome.RESERVED;
+import static com.webshop.inventory.dto.ReservationOutcome.COMMITTED;
+import static com.webshop.inventory.dto.ReservationOutcome.COMMIT_REJECTED;
+import static com.webshop.inventory.dto.ReservationOutcome.RELEASED;
+import static com.webshop.inventory.dto.ReservationOutcome.RELEASE_REJECTED;
+import static com.webshop.inventory.dto.ReservationOutcome.RESERVATION_REJECTED;
+import static com.webshop.inventory.dto.ReservationOutcome.RESERVED;
 
 /**
  * Nghiệp vụ tồn kho. Mọi thao tác reserve/commit/release:
@@ -38,26 +46,22 @@ import static com.webshop.inventory.application.ReservationOutcome.RESERVED;
  *     <li>được CHECK constraint trong DB bảo vệ lần cuối.</li>
  * </ul>
  */
+@Slf4j
 @Service
-public class InventoryService {
+@RequiredArgsConstructor
+public class InventoryServiceImpl implements InventoryService {
 
-    private static final Logger log = LoggerFactory.getLogger(InventoryService.class);
-
-    private final InventoryItemRepository items;
-    private final ReservationRepository reservations;
+    private final InventoryItemRepository inventoryItemRepository;
+    private final ReservationRepository reservationRepository;
+    private final InventoryMapper inventoryMapper;
     private final Clock clock;
 
-    public InventoryService(InventoryItemRepository items, ReservationRepository reservations, Clock clock) {
-        this.items = items;
-        this.reservations = reservations;
-        this.clock = clock;
-    }
-
+    @Override
     @Transactional(propagation = Propagation.MANDATORY)
-    public ReservationOutcome reserve(UUID reservationId, List<LineRequest> requested) {
+    public ReservationOutcome reserve(UUID reservationId, List<ReservationLineDto> requested) {
         Instant now = clock.instant();
-        int claimed = reservations.insertIfAbsent(reservationId, ReservationStatus.RESERVED.name(), null, now);
-        Reservation reservation = reservations.lockById(reservationId).orElseThrow();
+        int claimed = reservationRepository.insertIfAbsent(reservationId, ReservationStatus.RESERVED.name(), null, now);
+        Reservation reservation = reservationRepository.lockById(reservationId).orElseThrow();
         if (claimed == 0) {
             return replayReserve(reservation);
         }
@@ -69,8 +73,8 @@ public class InventoryService {
         }
 
         Map<UUID, Integer> quantities = requested.stream()
-                .collect(Collectors.toMap(LineRequest::productId, LineRequest::quantity));
-        Map<UUID, InventoryItem> locked = items.lockAllOrdered(quantities.keySet()).stream()
+                .collect(Collectors.toMap(ReservationLineDto::productId, ReservationLineDto::quantity));
+        Map<UUID, InventoryItem> locked = inventoryItemRepository.lockAllOrdered(quantities.keySet()).stream()
                 .collect(Collectors.toMap(InventoryItem::getProductId, Function.identity()));
 
         for (Map.Entry<UUID, Integer> entry : quantities.entrySet()) {
@@ -85,15 +89,16 @@ public class InventoryService {
         }
         // Đã kiểm tra đủ hàng cho TẤT CẢ dòng khi đang giữ khóa → giữ chỗ toàn bộ (all-or-nothing).
         quantities.forEach((productId, qty) -> locked.get(productId).reserve(qty, now));
-        reservation.markReserved(requested.stream().map(l -> new Reservation.Line(l.productId(), l.quantity()))
+        reservation.markReserved(requested.stream().map(l -> new ReservationLine(l.productId(), l.quantity()))
                 .toList(), now);
         log.info("Stock reserved reservationId={} lines={}", reservationId, requested.size());
         return new ReservationOutcome(RESERVED, reservationId, ReservationStatus.RESERVED, null, true);
     }
 
+    @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public ReservationOutcome commit(UUID reservationId) {
-        Reservation reservation = reservations.lockById(reservationId).orElse(null);
+        Reservation reservation = reservationRepository.lockById(reservationId).orElse(null);
         if (reservation == null) {
             return new ReservationOutcome(COMMIT_REJECTED, reservationId, null, "RESERVATION_NOT_FOUND", false);
         }
@@ -111,17 +116,18 @@ public class InventoryService {
         };
     }
 
+    @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public ReservationOutcome release(UUID reservationId, String reason) {
         Instant now = clock.instant();
-        int tombstone = reservations.insertIfAbsent(reservationId, ReservationStatus.RELEASED.name(),
+        int tombstone = reservationRepository.insertIfAbsent(reservationId, ReservationStatus.RELEASED.name(),
                 "RELEASED_BEFORE_RESERVE", now);
         if (tombstone == 1) {
             log.info("Release arrived before reserve; tombstone created reservationId={}", reservationId);
             return new ReservationOutcome(RELEASED, reservationId, ReservationStatus.RELEASED,
                     "RELEASED_BEFORE_RESERVE", true);
         }
-        Reservation reservation = reservations.lockById(reservationId).orElseThrow();
+        Reservation reservation = reservationRepository.lockById(reservationId).orElseThrow();
         return switch (reservation.getStatus()) {
             case RESERVED -> {
                 applyToLockedItems(reservation, (item, qty) -> item.release(qty, now));
@@ -137,22 +143,43 @@ public class InventoryService {
         };
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public StockResponse getStock(UUID productId) {
+        return inventoryItemRepository.findById(productId).map(inventoryMapper::toStockResponse)
+                .orElseThrow(() -> ApiException.notFound("INVENTORY_NOT_FOUND", "No inventory for " + productId));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<StockResponse> getStocks(List<UUID> productIds) {
+        return inventoryMapper.toStockResponses(inventoryItemRepository.findAllById(productIds));
+    }
+
+    @Override
     @Transactional
-    public InventoryItem setStock(UUID productId, int stockOnHand) {
+    public StockResponse setStock(UUID productId, int stockOnHand) {
         if (stockOnHand < 0) {
             throw ApiException.badRequest("INVALID_STOCK", "stockOnHand must be >= 0");
         }
         Instant now = clock.instant();
-        InventoryItem item = items.lockById(productId).orElse(null);
+        InventoryItem item = inventoryItemRepository.lockById(productId).orElse(null);
         if (item == null) {
-            return items.save(new InventoryItem(productId, stockOnHand, now));
+            return inventoryMapper.toStockResponse(inventoryItemRepository.save(new InventoryItem(productId, stockOnHand, now)));
         }
         try {
             item.setStockOnHand(stockOnHand, now);
         } catch (IllegalStateException e) {
             throw ApiException.conflict("STOCK_BELOW_RESERVED", e.getMessage());
         }
-        return item;
+        return inventoryMapper.toStockResponse(item);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ReservationResponse getReservation(UUID reservationId) {
+        return reservationRepository.findById(reservationId).map(inventoryMapper::toReservationResponse)
+                .orElseThrow(() -> ApiException.notFound("RESERVATION_NOT_FOUND", "Not found"));
     }
 
     private ReservationOutcome replayReserve(Reservation existing) {
@@ -166,22 +193,22 @@ public class InventoryService {
         };
     }
 
-    private void applyToLockedItems(Reservation reservation, java.util.function.ObjIntConsumer<InventoryItem> action) {
-        List<Reservation.Line> lines = reservation.getLines();
-        Map<UUID, InventoryItem> locked = items.lockAllOrdered(lines.stream().map(Reservation.Line::getProductId)
-                        .toList()).stream()
+    private void applyToLockedItems(Reservation reservation, ObjIntConsumer<InventoryItem> action) {
+        List<ReservationLine> lines = reservation.getLines();
+        Map<UUID, InventoryItem> locked = inventoryItemRepository.lockAllOrdered(
+                        lines.stream().map(ReservationLine::getProductId).toList()).stream()
                 .collect(Collectors.toMap(InventoryItem::getProductId, Function.identity()));
-        for (Reservation.Line line : lines) {
+        for (ReservationLine line : lines) {
             action.accept(locked.get(line.getProductId()), line.getQuantity());
         }
     }
 
-    private static String validate(List<LineRequest> lines) {
+    private static String validate(List<ReservationLineDto> lines) {
         if (lines == null || lines.isEmpty()) {
             return "INVALID_REQUEST:EMPTY";
         }
         Set<UUID> seen = new HashSet<>();
-        for (LineRequest line : lines) {
+        for (ReservationLineDto line : lines) {
             if (line.productId() == null || line.quantity() <= 0) {
                 return "INVALID_REQUEST:QUANTITY";
             }
@@ -190,8 +217,5 @@ public class InventoryService {
             }
         }
         return null;
-    }
-
-    public record LineRequest(UUID productId, int quantity) {
     }
 }

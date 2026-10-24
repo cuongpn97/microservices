@@ -1,11 +1,11 @@
 package com.webshop.inventory;
 
-import com.webshop.inventory.application.InventoryService;
-import com.webshop.inventory.application.InventoryService.LineRequest;
-import com.webshop.inventory.application.ReservationOutcome;
-import com.webshop.inventory.domain.InventoryItem;
-import com.webshop.inventory.domain.InventoryItemRepository;
-import com.webshop.inventory.domain.ReservationStatus;
+import com.webshop.inventory.service.InventoryService;
+import com.webshop.inventory.dto.ReservationLineDto;
+import com.webshop.inventory.dto.ReservationOutcome;
+import com.webshop.inventory.entity.InventoryItem;
+import com.webshop.inventory.repository.InventoryItemRepository;
+import com.webshop.inventory.enums.ReservationStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -40,7 +40,7 @@ class InventoryReservationIT extends AbstractInventoryIT {
         UUID product = newProduct(10);
         int buyers = 30;
         List<ReservationOutcome> outcomes = runConcurrently(buyers, i ->
-                inventory.reserve(UUID.randomUUID(), List.of(new LineRequest(product, 1))));
+                inventory.reserve(UUID.randomUUID(), List.of(new ReservationLineDto(product, 1))));
 
         long reserved = outcomes.stream().filter(o -> o.status() == ReservationStatus.RESERVED).count();
         long rejected = outcomes.stream().filter(o -> o.status() == ReservationStatus.REJECTED).count();
@@ -58,8 +58,8 @@ class InventoryReservationIT extends AbstractInventoryIT {
         UUID b = newProduct(5);
         List<ReservationOutcome> outcomes = runConcurrently(20, i -> inventory.reserve(UUID.randomUUID(),
                 i % 2 == 0
-                        ? List.of(new LineRequest(a, 1), new LineRequest(b, 1))
-                        : List.of(new LineRequest(b, 1), new LineRequest(a, 1))));
+                        ? List.of(new ReservationLineDto(a, 1), new ReservationLineDto(b, 1))
+                        : List.of(new ReservationLineDto(b, 1), new ReservationLineDto(a, 1))));
 
         assertThat(outcomes.stream().filter(o -> o.status() == ReservationStatus.RESERVED).count()).isEqualTo(5);
         assertThat(items.findById(a).orElseThrow().available()).isZero();
@@ -71,7 +71,7 @@ class InventoryReservationIT extends AbstractInventoryIT {
         UUID product = newProduct(10);
         UUID reservationId = UUID.randomUUID();
         List<ReservationOutcome> outcomes = runConcurrently(8, i ->
-                inventory.reserve(reservationId, List.of(new LineRequest(product, 3))));
+                inventory.reserve(reservationId, List.of(new ReservationLineDto(product, 3))));
 
         assertThat(outcomes).allMatch(o -> o.replyType().equals(ReservationOutcome.RESERVED));
         assertThat(outcomes.stream().filter(ReservationOutcome::applied).count()).isEqualTo(1);
@@ -83,7 +83,7 @@ class InventoryReservationIT extends AbstractInventoryIT {
         UUID a = newProduct(5);
         UUID b = newProduct(1);
         ReservationOutcome outcome = tx.execute(s -> inventory.reserve(UUID.randomUUID(),
-                List.of(new LineRequest(a, 2), new LineRequest(b, 2))));
+                List.of(new ReservationLineDto(a, 2), new ReservationLineDto(b, 2))));
 
         assertThat(outcome.replyType()).isEqualTo(ReservationOutcome.RESERVATION_REJECTED);
         assertThat(outcome.reason()).startsWith("INSUFFICIENT_STOCK");
@@ -94,7 +94,7 @@ class InventoryReservationIT extends AbstractInventoryIT {
     void commitIsIdempotentAndReleaseAfterCommitIsRefused() {
         UUID product = newProduct(5);
         UUID reservationId = UUID.randomUUID();
-        tx.execute(s -> inventory.reserve(reservationId, List.of(new LineRequest(product, 2))));
+        tx.execute(s -> inventory.reserve(reservationId, List.of(new ReservationLineDto(product, 2))));
 
         ReservationOutcome first = tx.execute(s -> inventory.commit(reservationId));
         ReservationOutcome second = tx.execute(s -> inventory.commit(reservationId));
@@ -115,8 +115,8 @@ class InventoryReservationIT extends AbstractInventoryIT {
         UUID product = newProduct(5);
         UUID other = UUID.randomUUID();
         UUID reservationId = UUID.randomUUID();
-        tx.execute(s -> inventory.reserve(other, List.of(new LineRequest(product, 1))));
-        tx.execute(s -> inventory.reserve(reservationId, List.of(new LineRequest(product, 2))));
+        tx.execute(s -> inventory.reserve(other, List.of(new ReservationLineDto(product, 1))));
+        tx.execute(s -> inventory.reserve(reservationId, List.of(new ReservationLineDto(product, 2))));
 
         tx.execute(s -> inventory.release(reservationId, "PAYMENT_FAILED"));
         ReservationOutcome again = tx.execute(s -> inventory.release(reservationId, "PAYMENT_FAILED"));
@@ -134,7 +134,7 @@ class InventoryReservationIT extends AbstractInventoryIT {
 
         ReservationOutcome release = tx.execute(s -> inventory.release(reservationId, "SAGA_TIMEOUT"));
         ReservationOutcome lateReserve = tx.execute(s -> inventory.reserve(reservationId,
-                List.of(new LineRequest(product, 2))));
+                List.of(new ReservationLineDto(product, 2))));
 
         assertThat(release.replyType()).isEqualTo(ReservationOutcome.RELEASED);
         assertThat(lateReserve.replyType()).isEqualTo(ReservationOutcome.RESERVATION_REJECTED);

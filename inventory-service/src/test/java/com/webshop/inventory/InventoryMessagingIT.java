@@ -1,8 +1,8 @@
 package com.webshop.inventory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.webshop.inventory.application.InventoryService;
-import com.webshop.inventory.domain.InventoryItemRepository;
+import com.webshop.inventory.service.InventoryService;
+import com.webshop.inventory.repository.InventoryItemRepository;
 import com.webshop.messaging.EventEnvelope;
 import com.webshop.messaging.RoutingKeys;
 import com.webshop.messaging.test.TestJwts;

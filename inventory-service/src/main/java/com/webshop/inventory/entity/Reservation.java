@@ -1,9 +1,9 @@
-package com.webshop.inventory.domain;
+package com.webshop.inventory.entity;
 
+import com.webshop.inventory.enums.ReservationStatus;
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
-import jakarta.persistence.Embeddable;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -12,6 +12,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -19,8 +22,15 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Giữ chỗ hàng cho một đơn (id = orderId). Dòng được tạo bằng ReservationRepository.insertIfAbsent
+ * (native INSERT ... ON CONFLICT) nên entity không có constructor public.
+ * Chuyển trạng thái hợp lệ: xem {@link ReservationStatus}.
+ */
 @Entity
 @Table(name = "reservation")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Reservation {
 
     @Id
@@ -34,7 +44,8 @@ public class Reservation {
 
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "reservation_line", joinColumns = @JoinColumn(name = "reservation_id"))
-    private List<Line> lines = new ArrayList<>();
+    @Getter(AccessLevel.NONE) // tự viết getLines() bên dưới: trả bản sao đã sắp xếp, không lộ list nội bộ
+    private List<ReservationLine> lines = new ArrayList<>();
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -45,30 +56,12 @@ public class Reservation {
     @Version
     private long version;
 
-    protected Reservation() {
+    /** Sắp theo productId để thứ tự khóa dòng tồn kho luôn cố định (tránh deadlock). */
+    public List<ReservationLine> getLines() {
+        return lines.stream().sorted(Comparator.comparing(ReservationLine::getProductId)).toList();
     }
 
-    public UUID getId() {
-        return id;
-    }
-
-    public ReservationStatus getStatus() {
-        return status;
-    }
-
-    public String getReason() {
-        return reason;
-    }
-
-    public List<Line> getLines() {
-        return lines.stream().sorted(Comparator.comparing(Line::getProductId)).toList();
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void markReserved(List<Line> reservedLines, Instant now) {
+    public void markReserved(List<ReservationLine> reservedLines, Instant now) {
         requireStatus(ReservationStatus.RESERVED);
         lines.clear();
         lines.addAll(reservedLines);
@@ -98,31 +91,6 @@ public class Reservation {
     private void requireStatus(ReservationStatus expected) {
         if (status != expected) {
             throw new IllegalStateException("Reservation " + id + " is " + status + ", expected " + expected);
-        }
-    }
-
-    @Embeddable
-    public static class Line {
-        @Column(name = "product_id", nullable = false)
-        private UUID productId;
-
-        @Column(nullable = false)
-        private int quantity;
-
-        protected Line() {
-        }
-
-        public Line(UUID productId, int quantity) {
-            this.productId = productId;
-            this.quantity = quantity;
-        }
-
-        public UUID getProductId() {
-            return productId;
-        }
-
-        public int getQuantity() {
-            return quantity;
         }
     }
 }

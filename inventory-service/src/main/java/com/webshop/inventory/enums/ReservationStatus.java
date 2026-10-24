@@ -1,4 +1,4 @@
-package com.webshop.inventory.domain;
+package com.webshop.inventory.enums;
 
 /**
  * Trạng thái reservation và các chuyển trạng thái hợp lệ:

@@ -1,4 +1,4 @@
-package com.webshop.inventory.domain;
+package com.webshop.inventory.entity;
 
 import org.junit.jupiter.api.Test;
 
