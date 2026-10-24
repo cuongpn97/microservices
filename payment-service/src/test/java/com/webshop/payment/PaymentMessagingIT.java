@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.webshop.messaging.EventEnvelope;
 import com.webshop.messaging.RoutingKeys;
 import com.webshop.messaging.test.TestJwts;
-import com.webshop.payment.wallet.WalletService;
+import com.webshop.payment.service.WalletService;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageBuilder;

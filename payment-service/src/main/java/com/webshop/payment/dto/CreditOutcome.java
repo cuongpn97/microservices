@@ -1,10 +1,12 @@
-package com.webshop.payment.wallet;
+package com.webshop.payment.dto;
 
 import java.util.UUID;
 
 /**
- * Kết quả của một lệnh tài chính. {@code applied=false}: lệnh trùng hoặc không hợp lệ ở trạng thái hiện tại,
- * KHÔNG có thay đổi số dư nào — nhưng vẫn trả reply để Saga luôn nhận được câu trả lời xác định.
+ * Kết quả của một lệnh tài chính (WalletService → PaymentCommandListener, rồi thành reply gửi Saga).
+ * {@code applied=false}: lệnh trùng hoặc không hợp lệ ở trạng thái hiện tại, KHÔNG có thay đổi số dư nào — nhưng vẫn trả reply để Saga luôn nhận được câu trả lời xác định.
+ * <p>
+ * status là String (không phải enum) vì giá trị này đi thẳng vào payload reply và có thể null.
  */
 public record CreditOutcome(String replyType, UUID reservationId, String status, String reason, long amountVnd,
                             boolean applied) {

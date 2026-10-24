@@ -1,7 +1,8 @@
 package com.webshop.payment;
 
-import com.webshop.payment.wallet.CreditOutcome;
-import com.webshop.payment.wallet.WalletService;
+import com.webshop.payment.dto.CreditOutcome;
+import com.webshop.payment.dto.response.WalletResponse;
+import com.webshop.payment.service.WalletService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
@@ -36,7 +37,7 @@ class WalletIT extends AbstractPaymentIT {
         List<Boolean> results = concurrently(10, i -> wallets.createWalletWithInitialCredit(userId));
 
         assertThat(results.stream().filter(Boolean::booleanValue).count()).isEqualTo(1);
-        WalletService.WalletView wallet = wallets.findWallet(userId).orElseThrow();
+        WalletResponse wallet = wallets.findWallet(userId).orElseThrow();
         assertThat(wallet.balanceVnd()).isEqualTo(10_000_000L);
         assertThat(wallet.availableVnd()).isEqualTo(10_000_000L);
         assertThat(ledgerCount(userId, "INITIAL_CREDIT")).isEqualTo(1);
@@ -51,7 +52,7 @@ class WalletIT extends AbstractPaymentIT {
 
         assertThat(outcomes.stream().filter(o -> o.replyType().equals(CreditOutcome.RESERVED)).count()).isEqualTo(10);
         assertThat(outcomes.stream().filter(o -> "INSUFFICIENT_FUNDS".equals(o.reason())).count()).isEqualTo(15);
-        WalletService.WalletView wallet = wallets.findWallet(userId).orElseThrow();
+        WalletResponse wallet = wallets.findWallet(userId).orElseThrow();
         assertThat(wallet.reservedVnd()).isEqualTo(10_000_000L);
         assertThat(wallet.availableVnd()).isZero();
         assertThat(wallet.balanceVnd()).as("reserve không trừ balance, chỉ giữ").isEqualTo(10_000_000L);
@@ -86,7 +87,7 @@ class WalletIT extends AbstractPaymentIT {
         assertThat(capture.applied()).isTrue();
         assertThat(resent.applied()).isFalse();
         assertThat(resent.replyType()).isEqualTo(CreditOutcome.CAPTURED);
-        WalletService.WalletView wallet = wallets.findWallet(userId).orElseThrow();
+        WalletResponse wallet = wallets.findWallet(userId).orElseThrow();
         assertThat(wallet.balanceVnd()).isEqualTo(7_000_000L);
         assertThat(wallet.reservedVnd()).isZero();
         assertThat(wallet.totalCapturedVnd()).isEqualTo(3_000_000L);
@@ -109,7 +110,7 @@ class WalletIT extends AbstractPaymentIT {
         assertThat(r1.applied()).isTrue();
         assertThat(r2.applied()).isFalse();
         assertThat(r3.replyType()).isEqualTo(CreditOutcome.RELEASE_REJECTED);
-        WalletService.WalletView wallet = wallets.findWallet(userId).orElseThrow();
+        WalletResponse wallet = wallets.findWallet(userId).orElseThrow();
         assertThat(wallet.balanceVnd()).isEqualTo(9_000_000L);
         assertThat(wallet.reservedVnd()).isZero();
         assertThat(ledgerCount(userId, "RELEASE")).isEqualTo(1);

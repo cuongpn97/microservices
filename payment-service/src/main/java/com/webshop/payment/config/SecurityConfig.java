@@ -2,10 +2,6 @@ package com.webshop.payment.config;
 
 import com.webshop.common.openapi.OpenApiConfig;
 import com.webshop.common.security.WebshopJwt;
-import com.webshop.messaging.MessagingProperties;
-import com.webshop.messaging.RoutingKeys;
-import com.webshop.messaging.consumer.RetryTopology;
-import org.springframework.amqp.core.Declarables;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -16,19 +12,7 @@ import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
 @EnableMethodSecurity
-public class PaymentConfig {
-
-    @Bean
-    public Declarables userRegisteredQueue(MessagingProperties properties) {
-        return RetryTopology.consumerQueue(properties, RoutingKeys.Q_PAYMENT_USER_REGISTERED,
-                RoutingKeys.USER_REGISTERED);
-    }
-
-    @Bean
-    public Declarables paymentCommandQueue(MessagingProperties properties) {
-        return RetryTopology.consumerQueue(properties, RoutingKeys.Q_PAYMENT_COMMANDS,
-                RoutingKeys.PAYMENT_COMMANDS_PATTERN);
-    }
+public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
