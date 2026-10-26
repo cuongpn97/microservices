@@ -38,6 +38,8 @@ public class TokenServiceImpl implements TokenService {
                 .issuedAt(now)
                 .expiresAt(expiresAt)
                 .claim(WebshopJwt.ROLES_CLAIM, user.getRoles())
+                // Để service khác hiển thị người dùng (ví dụ tên tác giả đánh giá, đã che bớt) mà không phải gọi Auth.
+                .claim(WebshopJwt.EMAIL_CLAIM, user.getEmail())
                 .build();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
         String token = jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();

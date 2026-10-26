@@ -22,11 +22,15 @@ public final class RoutingKeys {
 
     public static final String ORDER_CONFIRMED = "order.confirmed";
 
+    public static final String REVIEW_RATING_CHANGED = "review.rating.changed";
+
     public static final String Q_PAYMENT_USER_REGISTERED = "payment.user-registered.q";
     public static final String Q_PAYMENT_COMMANDS = "payment.commands.q";
     public static final String Q_INVENTORY_COMMANDS = "inventory.commands.q";
     public static final String Q_ORDER_SAGA_REPLIES = "order.saga-replies.q";
     public static final String Q_CART_ORDER_EVENTS = "cart.order-events.q";
+    public static final String Q_REVIEW_ORDER_EVENTS = "review.order-events.q";
+    public static final String Q_PRODUCT_REVIEW_EVENTS = "product.review-events.q";
 
     private RoutingKeys() {
     }

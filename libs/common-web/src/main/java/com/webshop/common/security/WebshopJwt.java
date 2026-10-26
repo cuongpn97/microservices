@@ -22,6 +22,7 @@ import java.util.UUID;
 public final class WebshopJwt {
 
     public static final String ROLES_CLAIM = "roles";
+    public static final String EMAIL_CLAIM = "email";
     private static final int MIN_SECRET_BYTES = 32;
 
     private WebshopJwt() {

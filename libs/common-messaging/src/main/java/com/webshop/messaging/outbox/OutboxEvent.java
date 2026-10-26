@@ -20,6 +20,12 @@ public record OutboxEvent(String aggregateType,
         return new OutboxEvent(aggregateType, aggregateId, eventType, 1, routingKey, payload, null, null, null);
     }
 
+    /** Payload theo schema mới (consumer kiểm tra eventVersion trước khi đọc). Mặc định của {@link #of} là 1. */
+    public OutboxEvent withVersion(int eventVersion) {
+        return new OutboxEvent(aggregateType, aggregateId, eventType, eventVersion, routingKey, payload,
+                correlationId, causationId, sagaId);
+    }
+
     public OutboxEvent withContext(String correlationId, String causationId, String sagaId) {
         return new OutboxEvent(aggregateType, aggregateId, eventType, eventVersion, routingKey, payload,
                 correlationId, causationId, sagaId);

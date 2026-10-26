@@ -46,6 +46,7 @@ public final class TestJwts {
                 .issuedAt(issuedAt)
                 .expiresAt(now.plus(ttl))
                 .claim(WebshopJwt.ROLES_CLAIM, roles)
+                .claim(WebshopJwt.EMAIL_CLAIM, "user-" + userId.toString().substring(0, 8) + "@example.com")
                 .build();
         return encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
                 .getTokenValue();
