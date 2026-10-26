@@ -5,7 +5,7 @@ import java.util.UUID;
 
 /** available = stockOnHand - reservedQuantity: số lượng còn bán được. */
 public record StockResponse(
-        UUID productId,
+        UUID skuId,
         int stockOnHand,
         int reservedQuantity,
         int available,

@@ -15,15 +15,15 @@ import java.util.UUID;
 public interface InventoryItemRepository extends JpaRepository<InventoryItem, UUID> {
 
     /**
-     * Khóa bi quan (SELECT ... FOR UPDATE) các dòng tồn kho THEO THỨ TỰ productId.
+     * Khóa bi quan (SELECT ... FOR UPDATE) các dòng tồn kho THEO THỨ TỰ skuId.
      * Thứ tự khóa cố định giữa mọi transaction → tránh deadlock khi hai đơn cùng chứa A và B
      * nhưng liệt kê theo thứ tự khác nhau.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select i from InventoryItem i where i.productId in :ids order by i.productId")
+    @Query("select i from InventoryItem i where i.skuId in :ids order by i.skuId")
     List<InventoryItem> lockAllOrdered(@Param("ids") Collection<UUID> ids);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select i from InventoryItem i where i.productId = :id")
+    @Query("select i from InventoryItem i where i.skuId = :id")
     Optional<InventoryItem> lockById(@Param("id") UUID id);
 }

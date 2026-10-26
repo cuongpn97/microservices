@@ -4,10 +4,11 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Payload event OrderConfirmed v1 do Order Service phát. Order còn gửi totalVnd nhưng Cart không cần → không khai báo.
+ * Payload event OrderConfirmed v2 do Order Service phát (v2: dòng hàng theo skuId). Order còn gửi totalVnd,
+ * productId, variantName nhưng Cart không cần → không khai báo (tolerant reader).
  */
 public record OrderConfirmedEvent(UUID orderId, UUID userId, List<Item> items) {
 
-    public record Item(UUID productId, int quantity) {
+    public record Item(UUID skuId, int quantity) {
     }
 }

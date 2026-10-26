@@ -2,6 +2,7 @@ package com.webshop.cart.messaging.listener;
 
 import com.rabbitmq.client.Channel;
 import com.webshop.cart.messaging.event.OrderConfirmedEvent;
+import com.webshop.cart.messaging.event.OrderConfirmedEventV1;
 import com.webshop.cart.service.CartService;
 import com.webshop.messaging.EventEnvelope;
 import com.webshop.messaging.RoutingKeys;
@@ -36,10 +37,13 @@ public class OrderEventsListener {
         if (!"OrderConfirmed".equals(envelope.eventType())) {
             return; // tolerant reader: bỏ qua event không quan tâm
         }
-        OrderConfirmedEvent event = processor.payload(envelope, OrderConfirmedEvent.class, 1);
-        // Gộp theo productId (Integer::sum) phòng khi một đơn có hai dòng cùng sản phẩm.
+        // v1 (trước SKU) vẫn có thể nằm trong queue/DLQ lúc nâng cấp → upcast thay vì từ chối.
+        OrderConfirmedEvent event = envelope.eventVersion() == 1
+                ? processor.payload(envelope, OrderConfirmedEventV1.class, 1).upcast()
+                : processor.payload(envelope, OrderConfirmedEvent.class, 2);
+        // Gộp theo skuId (Integer::sum) phòng khi một đơn có hai dòng cùng SKU.
         cartService.removePurchased(event.userId(), event.items().stream()
-                .collect(Collectors.toMap(OrderConfirmedEvent.Item::productId, OrderConfirmedEvent.Item::quantity,
+                .collect(Collectors.toMap(OrderConfirmedEvent.Item::skuId, OrderConfirmedEvent.Item::quantity,
                         Integer::sum)));
     }
 }

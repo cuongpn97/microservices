@@ -13,7 +13,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Tồn kho của một sản phẩm. Không có setter: mọi thay đổi số lượng đi qua reserve/commit/release/setStockOnHand,
+ * Tồn kho của một SKU (biến thể bán được — id do Product Service cấp). Không có setter: mọi thay đổi số lượng đi qua reserve/commit/release/setStockOnHand,
  * mỗi method tự kiểm tra bất biến (không âm, không thấp hơn lượng đang giữ chỗ).
  */
 @Entity
@@ -23,8 +23,8 @@ import java.util.UUID;
 public class InventoryItem {
 
     @Id
-    @Column(name = "product_id")
-    private UUID productId;
+    @Column(name = "sku_id")
+    private UUID skuId;
 
     @Column(name = "stock_on_hand", nullable = false)
     private int stockOnHand;
@@ -38,11 +38,11 @@ public class InventoryItem {
     @Version
     private long version;
 
-    public InventoryItem(UUID productId, int stockOnHand, Instant now) {
+    public InventoryItem(UUID skuId, int stockOnHand, Instant now) {
         if (stockOnHand < 0) {
             throw new IllegalArgumentException("stockOnHand must be >= 0");
         }
-        this.productId = productId;
+        this.skuId = skuId;
         this.stockOnHand = stockOnHand;
         this.reservedQuantity = 0;
         this.updatedAt = now;
@@ -60,7 +60,7 @@ public class InventoryItem {
     /** Giữ chỗ: hàng vẫn trong kho nhưng không bán cho người khác được nữa. */
     public void reserve(int quantity, Instant now) {
         if (!canReserve(quantity)) {
-            throw new IllegalStateException("Insufficient available stock for " + productId);
+            throw new IllegalStateException("Insufficient available stock for " + skuId);
         }
         reservedQuantity += quantity;
         updatedAt = now;
@@ -69,7 +69,7 @@ public class InventoryItem {
     /** Commit: hàng chính thức rời kho — giảm cả tồn kho và lượng đang giữ. */
     public void commit(int quantity, Instant now) {
         if (quantity <= 0 || reservedQuantity < quantity || stockOnHand < quantity) {
-            throw new IllegalStateException("Cannot commit " + quantity + " for " + productId);
+            throw new IllegalStateException("Cannot commit " + quantity + " for " + skuId);
         }
         reservedQuantity -= quantity;
         stockOnHand -= quantity;
@@ -79,7 +79,7 @@ public class InventoryItem {
     /** Release: trả lại lượng đang giữ cho phần available. */
     public void release(int quantity, Instant now) {
         if (quantity <= 0 || reservedQuantity < quantity) {
-            throw new IllegalStateException("Cannot release " + quantity + " for " + productId);
+            throw new IllegalStateException("Cannot release " + quantity + " for " + skuId);
         }
         reservedQuantity -= quantity;
         updatedAt = now;

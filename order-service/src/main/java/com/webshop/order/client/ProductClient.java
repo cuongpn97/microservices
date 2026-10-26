@@ -2,7 +2,7 @@ package com.webshop.order.client;
 
 import com.webshop.common.http.ResilientCaller;
 import com.webshop.common.http.RestClientFactory;
-import com.webshop.order.client.dto.ProductInfo;
+import com.webshop.order.client.dto.SkuInfo;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
@@ -12,7 +12,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
-/** Lấy dữ liệu sản phẩm CÓ THẨM QUYỀN (giá, tên, trạng thái) tại thời điểm checkout. */
+/** Lấy dữ liệu SKU CÓ THẨM QUYỀN (giá, tên, trạng thái) tại thời điểm checkout. */
 @Component
 public class ProductClient {
 
@@ -27,11 +27,11 @@ public class ProductClient {
         this.resilience = resilience;
     }
 
-    public List<ProductInfo> findAll(Collection<UUID> ids) {
+    public List<SkuInfo> findSkus(Collection<UUID> skuIds) {
         return resilience.idempotent(DEPENDENCY, () -> client.get()
-                .uri(b -> b.path("/api/products/batch").queryParam("ids", ids.toArray()).build())
+                .uri(b -> b.path("/api/products/skus/batch").queryParam("ids", skuIds.toArray()).build())
                 .retrieve()
-                .body(new ParameterizedTypeReference<List<ProductInfo>>() {
+                .body(new ParameterizedTypeReference<List<SkuInfo>>() {
                 }));
     }
 }

@@ -5,6 +5,7 @@ import com.webshop.inventory.dto.ReservationLineDto;
 import com.webshop.inventory.dto.ReservationOutcome;
 import com.webshop.inventory.messaging.command.ReservationRefCommand;
 import com.webshop.inventory.messaging.command.ReserveInventoryCommand;
+import com.webshop.inventory.messaging.command.ReserveInventoryCommandV1;
 import com.webshop.inventory.messaging.event.InventoryReplyEvent;
 import com.webshop.inventory.service.InventoryService;
 import com.webshop.messaging.EventEnvelope;
@@ -42,9 +43,12 @@ public class InventoryCommandListener {
     void handle(EventEnvelope envelope) {
         ReservationOutcome outcome = switch (envelope.eventType()) {
             case "ReserveInventory" -> {
-                ReserveInventoryCommand cmd = processor.payload(envelope, ReserveInventoryCommand.class, 1);
+                // v1 (trước SKU) có thể còn trong queue/retry/DLQ lúc nâng cấp → upcast thay vì từ chối.
+                ReserveInventoryCommand cmd = envelope.eventVersion() == 1
+                        ? processor.payload(envelope, ReserveInventoryCommandV1.class, 1).upcast()
+                        : processor.payload(envelope, ReserveInventoryCommand.class, 2);
                 yield inventoryService.reserve(cmd.reservationId(), cmd.items().stream()
-                        .map(i -> new ReservationLineDto(i.productId(), i.quantity())).toList());
+                        .map(i -> new ReservationLineDto(i.skuId(), i.quantity())).toList());
             }
             case "CommitInventory" -> inventoryService.commit(
                     processor.payload(envelope, ReservationRefCommand.class, 1).reservationId());

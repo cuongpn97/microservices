@@ -20,7 +20,7 @@ wait_wallet "$TOKEN" >/dev/null
 # ---------------------------------------------------------------------------------------------
 step "A. Dừng payment-service rồi checkout — Saga phải CHỜ, không mất message, không fail sai"
 $COMPOSE stop payment-service >/dev/null
-http POST /api/cart/items "$TOKEN" "{\"productId\":\"$KEYBOARD\",\"quantity\":1}" >/dev/null; expect_status 200
+http POST /api/cart/items "$TOKEN" "{\"skuId\":\"$KEYBOARD\",\"quantity\":1}" >/dev/null; expect_status 200
 RESP=$(http POST /api/orders/checkout "$TOKEN" "" "Idempotency-Key: outage-$(uuid)"); expect_status 202
 ORDER_ID=$(echo "$RESP" | jget orderId)
 sleep 8
@@ -54,7 +54,7 @@ ok "message hỏng nằm trong payment.commands.q.dlq kèm failureReason/lastErr
 # ---------------------------------------------------------------------------------------------
 step "C. Dừng product-service → circuit breaker 'product-service' của cart-service mở → fallback"
 # Giỏ phải có hàng thì Cart mới cần gọi Product Service để lấy giá.
-http POST /api/cart/items "$TOKEN" "{\"productId\":\"$KEYBOARD\",\"quantity\":1}" >/dev/null; expect_status 200
+http POST /api/cart/items "$TOKEN" "{\"skuId\":\"$KEYBOARD\",\"quantity\":1}" >/dev/null; expect_status 200
 $COMPOSE stop product-service >/dev/null
 for i in $(seq 1 6); do
   http GET /api/cart "$TOKEN" >/dev/null || true
@@ -67,7 +67,7 @@ BREAKER=$(curl -s -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8083/
 echo "    $(echo "$BREAKER" | grep -o '"product-service":{[^}]*}' | head -c 400)"
 echo "$BREAKER" | grep -q '"state":"OPEN"' || fail "circuit breaker should be OPEN"
 # Khi OPEN: thêm sản phẩm (cần xác thực sản phẩm) → 503 ngay lập tức, không chờ timeout.
-http POST /api/cart/items "$TOKEN" "{\"productId\":\"$KEYBOARD\",\"quantity\":1}" >/dev/null; expect_status 503
+http POST /api/cart/items "$TOKEN" "{\"skuId\":\"$KEYBOARD\",\"quantity\":1}" >/dev/null; expect_status 503
 $COMPOSE start product-service >/dev/null
 ok "giỏ vẫn đọc được (không có giá), circuit OPEN → fail-fast 503 cho thao tác cần Product Service"
 http DELETE /api/cart "$TOKEN" >/dev/null

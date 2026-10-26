@@ -31,11 +31,11 @@ step "4. Checkout khi chưa đăng nhập bị từ chối"
 http POST /api/orders/checkout "" "" "Idempotency-Key: anon-$(uuid)" >/dev/null; expect_status 401; ok "401"
 
 step "5. Thêm vào giỏ: 2 x Keyboard, 1 x Mouse"
-http POST /api/cart/items "$TOKEN" "{\"productId\":\"$KEYBOARD\",\"quantity\":2}" >/dev/null; expect_status 200
-http POST /api/cart/items "$TOKEN" "{\"productId\":\"$MOUSE\",\"quantity\":1}" >/dev/null; expect_status 200
+http POST /api/cart/items "$TOKEN" "{\"skuId\":\"$KEYBOARD\",\"quantity\":2}" >/dev/null; expect_status 200
+http POST /api/cart/items "$TOKEN" "{\"skuId\":\"$MOUSE\",\"quantity\":1}" >/dev/null; expect_status 200
 CART=$(http GET /api/cart "$TOKEN"); expect_status 200
 echo "    estimatedTotalVnd=$(echo "$CART" | jget estimatedTotalVnd)"
-http POST /api/cart/items "$TOKEN" "{\"productId\":\"$KEYBOARD\",\"quantity\":0}" >/dev/null; expect_status 400
+http POST /api/cart/items "$TOKEN" "{\"skuId\":\"$KEYBOARD\",\"quantity\":0}" >/dev/null; expect_status 400
 ok "cart ready (quantity 0 rejected with 400)"
 
 step "6. Checkout với Idempotency-Key (202 Accepted, Saga bắt đầu ở PENDING)"
@@ -71,7 +71,7 @@ ok "cart cleared"
 
 step "11. Thất bại có bồi hoàn: Laptop 25.000.000 > credit còn lại → giữ hàng rồi RELEASE"
 STOCK_BEFORE=$(http GET /api/inventory/$LAPTOP | jget reservedQuantity)
-http POST /api/cart/items "$TOKEN" "{\"productId\":\"$LAPTOP\",\"quantity\":1}" >/dev/null; expect_status 200
+http POST /api/cart/items "$TOKEN" "{\"skuId\":\"$LAPTOP\",\"quantity\":1}" >/dev/null; expect_status 200
 RESP=$(http POST /api/orders/checkout "$TOKEN" "" "Idempotency-Key: laptop-$(uuid)"); expect_status 202
 FINAL=$(wait_order "$TOKEN" "$(echo "$RESP" | jget orderId)")
 echo "    $FINAL"
@@ -83,7 +83,7 @@ ok "order FAILED, inventory reservation released, wallet untouched"
 http DELETE /api/cart "$TOKEN" >/dev/null
 
 step "12. Thất bại không cần bồi hoàn: Monitor chỉ còn 2 → đặt 3 bị từ chối ở bước giữ hàng"
-http POST /api/cart/items "$TOKEN" "{\"productId\":\"$MONITOR\",\"quantity\":3}" >/dev/null; expect_status 200
+http POST /api/cart/items "$TOKEN" "{\"skuId\":\"$MONITOR\",\"quantity\":3}" >/dev/null; expect_status 200
 RESP=$(http POST /api/orders/checkout "$TOKEN" "" "Idempotency-Key: monitor-$(uuid)"); expect_status 202
 FINAL=$(wait_order "$TOKEN" "$(echo "$RESP" | jget orderId)")
 echo "    $FINAL"

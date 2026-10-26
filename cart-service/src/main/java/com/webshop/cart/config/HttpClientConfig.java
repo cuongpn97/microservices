@@ -1,6 +1,6 @@
 package com.webshop.cart.config;
 
-import com.webshop.cart.client.ProductApi;
+import com.webshop.cart.client.CatalogApi;
 import com.webshop.common.http.RestClientFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -16,8 +16,8 @@ public class HttpClientConfig {
      * (giữ timeout tường minh + X-Correlation-Id như các client viết tay).
      */
     @Bean
-    public ProductApi productApi(RestClientFactory factory, @Value("${webshop.services.product-url}") String productUrl) {
+    public CatalogApi catalogApi(RestClientFactory factory, @Value("${webshop.services.product-url}") String productUrl) {
         RestClientAdapter adapter = RestClientAdapter.create(factory.create(productUrl));
-        return HttpServiceProxyFactory.builderFor(adapter).build().createClient(ProductApi.class);
+        return HttpServiceProxyFactory.builderFor(adapter).build().createClient(CatalogApi.class);
     }
 }

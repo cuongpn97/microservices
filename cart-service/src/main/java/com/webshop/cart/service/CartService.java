@@ -9,24 +9,24 @@ import java.util.UUID;
 public interface CartService {
 
     /**
-     * @param withPricing false: chỉ productId/quantity (Order Service dùng — nó tự lấy giá từ Product Service).
+     * @param withPricing false: chỉ skuId/quantity (Order Service dùng — nó tự lấy giá từ Product Service).
      *                    true: kèm giá hiện tại; Product Service lỗi → vẫn trả giỏ, pricingAvailable=false.
      */
     CartResponse getCart(UUID userId, boolean withPricing);
 
-    /** Sản phẩm phải tồn tại và đang bán (hỏi Product Service). Cộng dồn với số đang có. */
-    CartResponse addItem(UUID userId, UUID productId, int quantity);
+    /** SKU phải tồn tại và đang bán (hỏi Product Service). Cộng dồn với số đang có. */
+    CartResponse addItem(UUID userId, UUID skuId, int quantity);
 
-    CartResponse setQuantity(UUID userId, UUID productId, int quantity);
+    CartResponse setQuantity(UUID userId, UUID skuId, int quantity);
 
-    CartResponse removeItem(UUID userId, UUID productId);
+    CartResponse removeItem(UUID userId, UUID skuId);
 
     CartResponse clear(UUID userId);
 
     /**
      * Trừ các món đã mua khi đơn CONFIRMED. Gọi từ consumer OrderConfirmed, bắt buộc trong transaction cùng Inbox.
      *
-     * @param purchased productId → số lượng đã mua
+     * @param purchased skuId → số lượng đã mua
      */
     void removePurchased(UUID userId, Map<UUID, Integer> purchased);
 }

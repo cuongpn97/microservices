@@ -1,7 +1,7 @@
 package com.webshop.cart.service.impl;
 
 import com.webshop.cart.client.ProductClient;
-import com.webshop.cart.client.dto.ProductInfo;
+import com.webshop.cart.client.dto.SkuInfo;
 import com.webshop.cart.dto.response.CartResponse;
 import com.webshop.cart.entity.Cart;
 import com.webshop.cart.mapper.CartMapper;
@@ -50,9 +50,9 @@ public class CartServiceImpl implements CartService {
             return cartMapper.toResponseWithoutPricing(cart, true);
         }
         try {
-            Map<UUID, ProductInfo> products = productClient.findAll(cart.getItems().keySet()).stream()
-                    .collect(Collectors.toMap(ProductInfo::id, Function.identity()));
-            return cartMapper.toResponseWithPricing(cart, products);
+            Map<UUID, SkuInfo> skus = productClient.findSkus(cart.getItems().keySet()).stream()
+                    .collect(Collectors.toMap(SkuInfo::id, Function.identity()));
+            return cartMapper.toResponseWithPricing(cart, skus);
         } catch (DependencyUnavailableException e) {
             // Fallback: Product Service lỗi/circuit OPEN → vẫn trả giỏ, chỉ không có giá.
             log.warn("Product pricing unavailable, returning cart without prices: {}", e.getMessage());
@@ -61,20 +61,20 @@ public class CartServiceImpl implements CartService {
     }
 
     @Override
-    public CartResponse addItem(UUID userId, UUID productId, int quantity) {
-        requireActiveProduct(productId);
-        return modify(userId, cart -> cart.add(productId, quantity, clock.instant()));
+    public CartResponse addItem(UUID userId, UUID skuId, int quantity) {
+        requireSellableSku(skuId);
+        return modify(userId, cart -> cart.add(skuId, quantity, clock.instant()));
     }
 
     @Override
-    public CartResponse setQuantity(UUID userId, UUID productId, int quantity) {
-        requireActiveProduct(productId);
-        return modify(userId, cart -> cart.set(productId, quantity, clock.instant()));
+    public CartResponse setQuantity(UUID userId, UUID skuId, int quantity) {
+        requireSellableSku(skuId);
+        return modify(userId, cart -> cart.set(skuId, quantity, clock.instant()));
     }
 
     @Override
-    public CartResponse removeItem(UUID userId, UUID productId) {
-        return modify(userId, cart -> cart.remove(productId, clock.instant()));
+    public CartResponse removeItem(UUID userId, UUID skuId) {
+        return modify(userId, cart -> cart.remove(skuId, clock.instant()));
     }
 
     @Override
@@ -99,16 +99,16 @@ public class CartServiceImpl implements CartService {
             });
             return cartMapper.toResponseWithoutPricing(saved, false);
         } catch (IllegalArgumentException e) {
-            // Cart từ chối (quá 99 cái, quá 50 sản phẩm...) → 400.
+            // Cart từ chối (quá 99 cái, quá 50 SKU...) → 400.
             throw ApiException.badRequest("INVALID_CART_OPERATION", e.getMessage());
         }
     }
 
-    private void requireActiveProduct(UUID productId) {
-        ProductInfo product = productClient.find(productId)
-                .orElseThrow(() -> ApiException.unprocessable("PRODUCT_NOT_FOUND", "Product not found: " + productId));
-        if (!product.active()) {
-            throw ApiException.unprocessable("PRODUCT_UNAVAILABLE", "Product is not available: " + productId);
+    private void requireSellableSku(UUID skuId) {
+        SkuInfo sku = productClient.findSku(skuId)
+                .orElseThrow(() -> ApiException.unprocessable("SKU_NOT_FOUND", "SKU not found: " + skuId));
+        if (!sku.active()) {
+            throw ApiException.unprocessable("PRODUCT_UNAVAILABLE", "SKU is not available: " + skuId);
         }
     }
 }

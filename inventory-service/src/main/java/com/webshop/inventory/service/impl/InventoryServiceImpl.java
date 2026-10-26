@@ -73,14 +73,14 @@ public class InventoryServiceImpl implements InventoryService {
         }
 
         Map<UUID, Integer> quantities = requested.stream()
-                .collect(Collectors.toMap(ReservationLineDto::productId, ReservationLineDto::quantity));
+                .collect(Collectors.toMap(ReservationLineDto::skuId, ReservationLineDto::quantity));
         Map<UUID, InventoryItem> locked = inventoryItemRepository.lockAllOrdered(quantities.keySet()).stream()
-                .collect(Collectors.toMap(InventoryItem::getProductId, Function.identity()));
+                .collect(Collectors.toMap(InventoryItem::getSkuId, Function.identity()));
 
         for (Map.Entry<UUID, Integer> entry : quantities.entrySet()) {
             InventoryItem item = locked.get(entry.getKey());
             if (item == null || !item.canReserve(entry.getValue())) {
-                String reason = (item == null ? "UNKNOWN_PRODUCT:" : "INSUFFICIENT_STOCK:") + entry.getKey();
+                String reason = (item == null ? "UNKNOWN_SKU:" : "INSUFFICIENT_STOCK:") + entry.getKey();
                 reservation.reject(reason, now);
                 log.info("Reservation rejected reservationId={} reason={}", reservationId, reason);
                 return new ReservationOutcome(RESERVATION_REJECTED, reservationId, ReservationStatus.REJECTED,
@@ -88,8 +88,8 @@ public class InventoryServiceImpl implements InventoryService {
             }
         }
         // Đã kiểm tra đủ hàng cho TẤT CẢ dòng khi đang giữ khóa → giữ chỗ toàn bộ (all-or-nothing).
-        quantities.forEach((productId, qty) -> locked.get(productId).reserve(qty, now));
-        reservation.markReserved(requested.stream().map(l -> new ReservationLine(l.productId(), l.quantity()))
+        quantities.forEach((skuId, qty) -> locked.get(skuId).reserve(qty, now));
+        reservation.markReserved(requested.stream().map(l -> new ReservationLine(l.skuId(), l.quantity()))
                 .toList(), now);
         log.info("Stock reserved reservationId={} lines={}", reservationId, requested.size());
         return new ReservationOutcome(RESERVED, reservationId, ReservationStatus.RESERVED, null, true);
@@ -145,27 +145,27 @@ public class InventoryServiceImpl implements InventoryService {
 
     @Override
     @Transactional(readOnly = true)
-    public StockResponse getStock(UUID productId) {
-        return inventoryItemRepository.findById(productId).map(inventoryMapper::toStockResponse)
-                .orElseThrow(() -> ApiException.notFound("INVENTORY_NOT_FOUND", "No inventory for " + productId));
+    public StockResponse getStock(UUID skuId) {
+        return inventoryItemRepository.findById(skuId).map(inventoryMapper::toStockResponse)
+                .orElseThrow(() -> ApiException.notFound("INVENTORY_NOT_FOUND", "No inventory for " + skuId));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<StockResponse> getStocks(List<UUID> productIds) {
-        return inventoryMapper.toStockResponses(inventoryItemRepository.findAllById(productIds));
+    public List<StockResponse> getStocks(List<UUID> skuIds) {
+        return inventoryMapper.toStockResponses(inventoryItemRepository.findAllById(skuIds));
     }
 
     @Override
     @Transactional
-    public StockResponse setStock(UUID productId, int stockOnHand) {
+    public StockResponse setStock(UUID skuId, int stockOnHand) {
         if (stockOnHand < 0) {
             throw ApiException.badRequest("INVALID_STOCK", "stockOnHand must be >= 0");
         }
         Instant now = clock.instant();
-        InventoryItem item = inventoryItemRepository.lockById(productId).orElse(null);
+        InventoryItem item = inventoryItemRepository.lockById(skuId).orElse(null);
         if (item == null) {
-            return inventoryMapper.toStockResponse(inventoryItemRepository.save(new InventoryItem(productId, stockOnHand, now)));
+            return inventoryMapper.toStockResponse(inventoryItemRepository.save(new InventoryItem(skuId, stockOnHand, now)));
         }
         try {
             item.setStockOnHand(stockOnHand, now);
@@ -196,10 +196,10 @@ public class InventoryServiceImpl implements InventoryService {
     private void applyToLockedItems(Reservation reservation, ObjIntConsumer<InventoryItem> action) {
         List<ReservationLine> lines = reservation.getLines();
         Map<UUID, InventoryItem> locked = inventoryItemRepository.lockAllOrdered(
-                        lines.stream().map(ReservationLine::getProductId).toList()).stream()
-                .collect(Collectors.toMap(InventoryItem::getProductId, Function.identity()));
+                        lines.stream().map(ReservationLine::getSkuId).toList()).stream()
+                .collect(Collectors.toMap(InventoryItem::getSkuId, Function.identity()));
         for (ReservationLine line : lines) {
-            action.accept(locked.get(line.getProductId()), line.getQuantity());
+            action.accept(locked.get(line.getSkuId()), line.getQuantity());
         }
     }
 
@@ -209,11 +209,11 @@ public class InventoryServiceImpl implements InventoryService {
         }
         Set<UUID> seen = new HashSet<>();
         for (ReservationLineDto line : lines) {
-            if (line.productId() == null || line.quantity() <= 0) {
+            if (line.skuId() == null || line.quantity() <= 0) {
                 return "INVALID_REQUEST:QUANTITY";
             }
-            if (!seen.add(line.productId())) {
-                return "INVALID_REQUEST:DUPLICATE_PRODUCT";
+            if (!seen.add(line.skuId())) {
+                return "INVALID_REQUEST:DUPLICATE_SKU";
             }
         }
         return null;

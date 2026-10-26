@@ -11,6 +11,6 @@ import java.util.UUID;
  */
 public record CartSnapshot(UUID userId, long revision, List<Line> items) {
 
-    public record Line(UUID productId, int quantity) {
+    public record Line(UUID skuId, int quantity) {
     }
 }

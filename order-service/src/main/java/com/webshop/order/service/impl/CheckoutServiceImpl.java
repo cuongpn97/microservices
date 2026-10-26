@@ -5,7 +5,7 @@ import com.webshop.common.web.CorrelationIds;
 import com.webshop.order.client.CartClient;
 import com.webshop.order.client.ProductClient;
 import com.webshop.order.client.dto.CartSnapshot;
-import com.webshop.order.client.dto.ProductInfo;
+import com.webshop.order.client.dto.SkuInfo;
 import com.webshop.order.dto.CheckoutResult;
 import com.webshop.order.dto.response.OrderResponse;
 import com.webshop.order.entity.Order;
@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
  * Bước đồng bộ của checkout (trước khi Saga bất đồng bộ chạy):
  * <ol>
  *   <li>Idempotency-Key đã dùng → trả lại đơn cũ (client retry không tạo đơn mới).</li>
- *   <li>Đọc giỏ hàng (Cart Service, bằng token của user) và giá/trạng thái sản phẩm (Product Service).
+ *   <li>Đọc giỏ hàng (Cart Service, bằng token của user) và giá/trạng thái từng SKU (Product Service).
  *       KHÔNG tin giá/tổng tiền từ client.</li>
  *   <li>Một transaction cục bộ: ghi Order (PENDING) + snapshot item + Saga + command ReserveInventory (Outbox).</li>
  * </ol>
@@ -103,22 +103,23 @@ public class CheckoutServiceImpl implements CheckoutService {
         }
     }
 
-    /** Định giá từ Product Service (nguồn có thẩm quyền), không dùng giá trong giỏ hay từ client. */
+    /** Định giá từng SKU từ Product Service (nguồn có thẩm quyền), không dùng giá trong giỏ hay từ client. */
     private List<OrderItem> priceItems(CartSnapshot cart) {
-        Map<UUID, ProductInfo> products = productClient.findAll(
-                        cart.items().stream().map(CartSnapshot.Line::productId).toList())
-                .stream().collect(Collectors.toMap(ProductInfo::id, Function.identity()));
+        Map<UUID, SkuInfo> skus = productClient.findSkus(
+                        cart.items().stream().map(CartSnapshot.Line::skuId).toList())
+                .stream().collect(Collectors.toMap(SkuInfo::id, Function.identity()));
         List<OrderItem> items = new ArrayList<>();
         for (CartSnapshot.Line line : cart.items()) {
-            ProductInfo product = products.get(line.productId());
-            if (product == null || !product.active()) {
+            SkuInfo sku = skus.get(line.skuId());
+            if (sku == null || !sku.active()) {
                 throw ApiException.unprocessable("PRODUCT_UNAVAILABLE",
-                        "Product is no longer available: " + line.productId());
+                        "Product variant is no longer available: " + line.skuId());
             }
             if (line.quantity() <= 0 || line.quantity() > 99) {
-                throw ApiException.unprocessable("INVALID_QUANTITY", "Invalid quantity for " + line.productId());
+                throw ApiException.unprocessable("INVALID_QUANTITY", "Invalid quantity for " + line.skuId());
             }
-            items.add(new OrderItem(product.id(), product.name(), product.priceVnd(), line.quantity()));
+            items.add(new OrderItem(sku.id(), sku.productId(), sku.productName(), sku.skuCode(), sku.variantName(),
+                    sku.priceVnd(), line.quantity()));
         }
         return items;
     }

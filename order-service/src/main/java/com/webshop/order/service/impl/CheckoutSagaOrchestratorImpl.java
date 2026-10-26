@@ -148,8 +148,9 @@ public class CheckoutSagaOrchestratorImpl implements CheckoutSagaOrchestrator {
             outboxWriter.append(event(saga, "OrderConfirmed", RoutingKeys.ORDER_CONFIRMED, causationId,
                     new OrderConfirmedEvent(order.getId(), order.getUserId(), order.getTotalVnd(),
                             order.getItems().stream()
-                                    .map(i -> new OrderConfirmedEvent.Item(i.getProductId(), i.getQuantity()))
-                                    .toList())));
+                                    .map(i -> new OrderConfirmedEvent.Item(i.getSkuId(), i.getProductId(),
+                                            i.getProductName(), i.getVariantName(), i.getQuantity()))
+                                    .toList())).withVersion(OrderConfirmedEvent.VERSION));
         } else if (t.to() == SagaState.FAILED) {
             order.fail(saga.getFailureReason(), now);
             String category = saga.getFailureReason() == null ? "UNKNOWN" : saga.getFailureReason().split(":")[0];
@@ -170,8 +171,8 @@ public class CheckoutSagaOrchestratorImpl implements CheckoutSagaOrchestrator {
             OutboxEvent event = switch (command) {
                 case RESERVE_INVENTORY -> event(saga, "ReserveInventory", RoutingKeys.INVENTORY_RESERVE, causationId,
                         new ReserveInventoryCommand(id, order.getItems().stream()
-                                .map(i -> new ReserveInventoryCommand.Item(i.getProductId(), i.getQuantity()))
-                                .toList()));
+                                .map(i -> new ReserveInventoryCommand.Item(i.getSkuId(), i.getQuantity()))
+                                .toList())).withVersion(ReserveInventoryCommand.VERSION);
                 case COMMIT_INVENTORY -> event(saga, "CommitInventory", RoutingKeys.INVENTORY_COMMIT, causationId,
                         new CommitInventoryCommand(id));
                 case RELEASE_INVENTORY -> event(saga, "ReleaseInventory", RoutingKeys.INVENTORY_RELEASE, causationId,

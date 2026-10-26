@@ -33,7 +33,7 @@ public class CartController {
     private final CartService cartService;
 
     /**
-     * @param pricing false: chỉ trả productId/quantity (Order Service dùng — nó tự lấy giá từ Product Service).
+     * @param pricing false: chỉ trả skuId/quantity (Order Service dùng — nó tự lấy giá từ Product Service).
      */
     @GetMapping
     public CartResponse get(@AuthenticationPrincipal Jwt jwt, @RequestParam(defaultValue = "true") boolean pricing) {
@@ -42,18 +42,18 @@ public class CartController {
 
     @PostMapping("/items")
     public CartResponse add(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody AddItemRequest request) {
-        return cartService.addItem(WebshopJwt.userId(jwt), request.productId(), request.quantity());
+        return cartService.addItem(WebshopJwt.userId(jwt), request.skuId(), request.quantity());
     }
 
-    @PutMapping("/items/{productId}")
-    public CartResponse set(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID productId,
+    @PutMapping("/items/{skuId}")
+    public CartResponse set(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID skuId,
                             @Valid @RequestBody SetQuantityRequest request) {
-        return cartService.setQuantity(WebshopJwt.userId(jwt), productId, request.quantity());
+        return cartService.setQuantity(WebshopJwt.userId(jwt), skuId, request.quantity());
     }
 
-    @DeleteMapping("/items/{productId}")
-    public CartResponse remove(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID productId) {
-        return cartService.removeItem(WebshopJwt.userId(jwt), productId);
+    @DeleteMapping("/items/{skuId}")
+    public CartResponse remove(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID skuId) {
+        return cartService.removeItem(WebshopJwt.userId(jwt), skuId);
     }
 
     @DeleteMapping

@@ -4,11 +4,14 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Command "ReserveInventory" v1 gửi Inventory Service. Các payload command trong package này là contract với
- * Inventory/Payment: tên field phải khớp với record nhận bên đó (ví dụ inventory ReserveInventoryCommand).
+ * Command "ReserveInventory" v2 gửi Inventory Service (v2: dòng hàng theo skuId — tồn kho tính theo biến thể).
+ * Các payload command trong package này là contract với Inventory/Payment: tên field phải khớp với record nhận bên
+ * đó (ví dụ inventory ReserveInventoryCommand).
  */
 public record ReserveInventoryCommand(UUID reservationId, List<Item> items) {
 
-    public record Item(UUID productId, int quantity) {
+    public static final int VERSION = 2;
+
+    public record Item(UUID skuId, int quantity) {
     }
 }

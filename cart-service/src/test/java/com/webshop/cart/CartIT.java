@@ -2,7 +2,7 @@ package com.webshop.cart;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.webshop.cart.client.ProductClient;
-import com.webshop.cart.client.dto.ProductInfo;
+import com.webshop.cart.client.dto.SkuInfo;
 import com.webshop.common.http.DependencyUnavailableException;
 import com.webshop.messaging.EventEnvelope;
 import com.webshop.messaging.RoutingKeys;
@@ -48,6 +48,7 @@ class CartIT {
     static final UUID KEYBOARD = UUID.fromString("11111111-1111-1111-1111-111111111111");
     static final UUID MOUSE = UUID.fromString("22222222-2222-2222-2222-222222222222");
     static final UUID DISCONTINUED = UUID.fromString("55555555-5555-5555-5555-555555555555");
+    static final UUID PRODUCT = UUID.randomUUID();
 
     @DynamicPropertySource
     static void containers(DynamicPropertyRegistry registry) {
@@ -68,12 +69,12 @@ class CartIT {
 
     @BeforeEach
     void stubProducts() {
-        ProductInfo keyboard = new ProductInfo(KEYBOARD, "Keyboard", 1_500_000, true);
-        ProductInfo mouse = new ProductInfo(MOUSE, "Mouse", 450_000, true);
-        given(products.find(KEYBOARD)).willReturn(Optional.of(keyboard));
-        given(products.find(MOUSE)).willReturn(Optional.of(mouse));
-        given(products.find(DISCONTINUED)).willReturn(Optional.of(new ProductInfo(DISCONTINUED, "Old", 1, false)));
-        given(products.findAll(anyCollection())).willReturn(List.of(keyboard, mouse));
+        SkuInfo keyboard = sku(KEYBOARD, "Keyboard", 1_500_000, true);
+        SkuInfo mouse = sku(MOUSE, "Mouse", 450_000, true);
+        given(products.findSku(KEYBOARD)).willReturn(Optional.of(keyboard));
+        given(products.findSku(MOUSE)).willReturn(Optional.of(mouse));
+        given(products.findSku(DISCONTINUED)).willReturn(Optional.of(sku(DISCONTINUED, "Old", 1, false)));
+        given(products.findSkus(anyCollection())).willReturn(List.of(keyboard, mouse));
     }
 
     @Test
@@ -91,13 +92,14 @@ class CartIT {
         mvc.perform(get("/api/cart").header("Authorization", TestJwts.bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items", hasSize(2)))
-                .andExpect(jsonPath("$.items[?(@.productId=='" + KEYBOARD + "')].quantity").value(3))
+                .andExpect(jsonPath("$.items[?(@.skuId=='" + KEYBOARD + "')].quantity").value(3))
+                .andExpect(jsonPath("$.items[?(@.skuId=='" + KEYBOARD + "')].variantName").value("Red"))
                 .andExpect(jsonPath("$.estimatedTotalVnd").value(3 * 1_500_000 + 450_000))
                 .andExpect(jsonPath("$.revision").value(3));
     }
 
     @Test
-    void quantitiesMustBePositiveAndProductsActive() throws Exception {
+    void quantitiesMustBePositiveAndSkusSellable() throws Exception {
         String token = TestJwts.user(UUID.randomUUID());
         add(token, KEYBOARD, 0).andExpect(status().isBadRequest());
         add(token, KEYBOARD, -3).andExpect(status().isBadRequest());
@@ -121,7 +123,7 @@ class CartIT {
     void cartStillReadableWithoutPricesWhenProductServiceIsDown() throws Exception {
         String token = TestJwts.user(UUID.randomUUID());
         add(token, KEYBOARD, 1).andExpect(status().isOk());
-        given(products.findAll(anyCollection()))
+        given(products.findSkus(anyCollection()))
                 .willThrow(new DependencyUnavailableException("product-service", "circuit breaker is OPEN", null));
 
         mvc.perform(get("/api/cart").header("Authorization", TestJwts.bearer(token)))
@@ -133,7 +135,7 @@ class CartIT {
     @Test
     void addingItemWhenProductServiceIsDownReturns503() throws Exception {
         String token = TestJwts.user(UUID.randomUUID());
-        given(products.find(any())).willThrow(new DependencyUnavailableException("product-service", "timeout", null));
+        given(products.findSku(any())).willThrow(new DependencyUnavailableException("product-service", "timeout", null));
         add(token, KEYBOARD, 1).andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("DEPENDENCY_UNAVAILABLE"));
     }
@@ -148,32 +150,48 @@ class CartIT {
         // Đơn hàng mua 1 keyboard + 1 mouse; sau checkout user thêm 1 keyboard nữa (vẫn phải còn lại).
         UUID eventId = UUID.randomUUID();
         Map<String, Object> payload = Map.of("orderId", UUID.randomUUID(), "userId", userId,
-                "items", List.of(Map.of("productId", KEYBOARD, "quantity", 1), Map.of("productId", MOUSE, "quantity", 1)));
-        sendOrderConfirmed(eventId, payload);
-        sendOrderConfirmed(eventId, payload); // giao trùng
+                "items", List.of(Map.of("skuId", KEYBOARD, "quantity", 1), Map.of("skuId", MOUSE, "quantity", 1)));
+        sendOrderConfirmed(eventId, 2, payload);
+        sendOrderConfirmed(eventId, 2, payload); // giao trùng
 
         await().atMost(Duration.ofSeconds(10)).until(() -> quantity(userId, MOUSE) == null);
         await().during(Duration.ofMillis(500)).atMost(Duration.ofSeconds(5))
                 .until(() -> Integer.valueOf(1).equals(quantity(userId, KEYBOARD)));
     }
 
-    private Integer quantity(UUID userId, UUID productId) {
-        return jdbc.queryForList("SELECT quantity FROM cart_item WHERE user_id = ? AND product_id = ?",
-                Integer.class, userId, productId).stream().findFirst().orElse(null);
+    @Test
+    void legacyV1OrderConfirmedIsUpcastFromProductIdToSkuId() throws Exception {
+        UUID userId = UUID.randomUUID();
+        add(TestJwts.user(userId), MOUSE, 1).andExpect(status().isOk());
+
+        // Message phát trước lúc nâng cấp: dòng hàng theo productId = id SKU mặc định.
+        sendOrderConfirmed(UUID.randomUUID(), 1, Map.of("orderId", UUID.randomUUID(), "userId", userId,
+                "items", List.of(Map.of("productId", MOUSE, "quantity", 1))));
+
+        await().atMost(Duration.ofSeconds(10)).until(() -> quantity(userId, MOUSE) == null);
     }
 
-    private void sendOrderConfirmed(UUID eventId, Object payload) throws Exception {
-        EventEnvelope envelope = new EventEnvelope(eventId, "OrderConfirmed", 1, Instant.now(), "Order", "o",
+    private static SkuInfo sku(UUID id, String name, long price, boolean active) {
+        return new SkuInfo(id, PRODUCT, "slug", name, "SKU-" + name.toUpperCase(), "Red", price, null, active);
+    }
+
+    private Integer quantity(UUID userId, UUID skuId) {
+        return jdbc.queryForList("SELECT quantity FROM cart_item WHERE user_id = ? AND sku_id = ?",
+                Integer.class, userId, skuId).stream().findFirst().orElse(null);
+    }
+
+    private void sendOrderConfirmed(UUID eventId, int version, Object payload) throws Exception {
+        EventEnvelope envelope = new EventEnvelope(eventId, "OrderConfirmed", version, Instant.now(), "Order", "o",
                 "corr", null, null, objectMapper.valueToTree(payload));
         rabbit.send("webshop.events", RoutingKeys.ORDER_CONFIRMED,
                 MessageBuilder.withBody(objectMapper.writeValueAsBytes(envelope))
                         .setContentType(MessageProperties.CONTENT_TYPE_JSON).setMessageId(eventId.toString()).build());
     }
 
-    private org.springframework.test.web.servlet.ResultActions add(String token, UUID productId, int qty)
+    private org.springframework.test.web.servlet.ResultActions add(String token, UUID skuId, int qty)
             throws Exception {
         return mvc.perform(post("/api/cart/items").header("Authorization", TestJwts.bearer(token))
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"productId\":\"" + productId + "\",\"quantity\":" + qty + "}"));
+                .content("{\"skuId\":\"" + skuId + "\",\"quantity\":" + qty + "}"));
     }
 }

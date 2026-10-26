@@ -98,7 +98,7 @@ public class Order {
     }
 
     public List<OrderItem> getItems() {
-        return items.stream().sorted(Comparator.comparing(OrderItem::getProductId)).toList();
+        return items.stream().sorted(Comparator.comparing(OrderItem::getSkuId)).toList();
     }
 
     private void requirePending() {

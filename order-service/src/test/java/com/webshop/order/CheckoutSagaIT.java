@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.webshop.common.http.DependencyUnavailableException;
 import com.webshop.messaging.test.TestJwts;
 import com.webshop.order.client.dto.CartSnapshot;
-import com.webshop.order.client.dto.ProductInfo;
+import com.webshop.order.client.dto.SkuInfo;
 import com.webshop.order.enums.SagaState;
 import com.webshop.order.scheduler.SagaTimeoutWatcher;
 import jakarta.persistence.EntityManagerFactory;
@@ -49,9 +49,9 @@ class CheckoutSagaIT extends AbstractOrderIT {
         UUID userId = UUID.randomUUID();
         given(cartClient.getCart(anyString())).willReturn(new CartSnapshot(userId, revision, List.of(
                 new CartSnapshot.Line(KEYBOARD, 2), new CartSnapshot.Line(MOUSE, 1))));
-        given(productClient.findAll(anyCollection())).willReturn(List.of(
-                new ProductInfo(KEYBOARD, "Mechanical Keyboard", 1_500_000, true),
-                new ProductInfo(MOUSE, "Wireless Mouse", 450_000, true)));
+        given(productClient.findSkus(anyCollection())).willReturn(List.of(
+                sku(KEYBOARD, "Mechanical Keyboard", 1_500_000, true),
+                sku(MOUSE, "Wireless Mouse", 450_000, true)));
         return TestJwts.user(userId);
     }
 
@@ -82,13 +82,13 @@ class CheckoutSagaIT extends AbstractOrderIT {
     @Test
     void inactiveProductOrEmptyCartIsRejectedAndDependencyOutageIs503() throws Exception {
         String token = userWithCart(1);
-        given(productClient.findAll(anyCollection())).willReturn(List.of(
-                new ProductInfo(KEYBOARD, "Keyboard", 1_500_000, false),
-                new ProductInfo(MOUSE, "Mouse", 450_000, true)));
+        given(productClient.findSkus(anyCollection())).willReturn(List.of(
+                sku(KEYBOARD, "Keyboard", 1_500_000, false),
+                sku(MOUSE, "Mouse", 450_000, true)));
         checkout(token, "key-inactive-1").andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("PRODUCT_UNAVAILABLE"));
 
-        given(productClient.findAll(anyCollection()))
+        given(productClient.findSkus(anyCollection()))
                 .willThrow(new DependencyUnavailableException("product-service", "circuit breaker is OPEN", null));
         checkout(token, "key-outage-1").andExpect(status().isServiceUnavailable());
 
@@ -120,6 +120,9 @@ class CheckoutSagaIT extends AbstractOrderIT {
         assertThat(reserve.get("sagaId").asText()).isEqualTo(orderId.toString());
         assertThat(reserve.get("correlationId").asText()).isNotBlank();
         assertThat(reserve.get("payload").get("items")).hasSize(2);
+        // v2: tồn kho giữ theo SKU.
+        assertThat(reserve.get("eventVersion").asInt()).isEqualTo(2);
+        assertThat(reserve.get("payload").get("items").get(0).get("skuId").asText()).isEqualTo(KEYBOARD.toString());
 
         reply("InventoryReserved", orderId, null);
         awaitState(orderId, SagaState.INVENTORY_RESERVED);
@@ -188,9 +191,9 @@ class CheckoutSagaIT extends AbstractOrderIT {
     void listingOrdersUsesConstantNumberOfQueriesRegardlessOfOrderCount() throws Exception {
         UUID userId = UUID.randomUUID();
         String token = TestJwts.user(userId);
-        given(productClient.findAll(anyCollection())).willReturn(List.of(
-                new ProductInfo(KEYBOARD, "Mechanical Keyboard", 1_500_000, true),
-                new ProductInfo(MOUSE, "Wireless Mouse", 450_000, true)));
+        given(productClient.findSkus(anyCollection())).willReturn(List.of(
+                sku(KEYBOARD, "Mechanical Keyboard", 1_500_000, true),
+                sku(MOUSE, "Wireless Mouse", 450_000, true)));
         for (long revision = 1; revision <= 5; revision++) {
             // Mỗi đơn một cart revision khác nhau để không vướng ux_orders_active_cart.
             given(cartClient.getCart(anyString())).willReturn(new CartSnapshot(userId, revision, List.of(
@@ -354,5 +357,10 @@ class CheckoutSagaIT extends AbstractOrderIT {
         startCheckout(token);
         // Order Service chuyển tiếp token của user; Cart Service tự xác định giỏ theo "sub" trong token đó.
         org.mockito.Mockito.verify(cartClient, org.mockito.Mockito.atLeastOnce()).getCart(token);
+    }
+
+    private static SkuInfo sku(UUID id, String name, long priceVnd, boolean active) {
+        UUID productId = UUID.nameUUIDFromBytes(("spu:" + id).getBytes());
+        return new SkuInfo(id, productId, name, "SKU-" + id.toString().substring(0, 4), "", priceVnd, active);
     }
 }

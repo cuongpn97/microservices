@@ -146,10 +146,10 @@ class InventoryReservationIT extends AbstractInventoryIT {
     void databaseConstraintIsTheLastLineOfDefenceAgainstOverselling() {
         UUID product = newProduct(1);
         assertThatThrownBy(() -> jdbc.update(
-                "UPDATE inventory_item SET reserved_quantity = 2 WHERE product_id = ?", product))
+                "UPDATE inventory_item SET reserved_quantity = 2 WHERE sku_id = ?", product))
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update(
-                "UPDATE inventory_item SET stock_on_hand = -1 WHERE product_id = ?", product))
+                "UPDATE inventory_item SET stock_on_hand = -1 WHERE sku_id = ?", product))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 

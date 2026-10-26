@@ -52,7 +52,7 @@ class InventoryMessagingIT extends AbstractInventoryIT {
         inventory.setStock(product, 10);
         UUID orderId = UUID.randomUUID();
         Map<String, Object> payload = Map.of("reservationId", orderId,
-                "items", List.of(Map.of("productId", product, "quantity", 4)));
+                "items", List.of(Map.of("skuId", product, "quantity", 4)));
 
         UUID firstEventId = UUID.randomUUID();
         send("ReserveInventory", RoutingKeys.INVENTORY_RESERVE, firstEventId, orderId, payload);
@@ -104,8 +104,8 @@ class InventoryMessagingIT extends AbstractInventoryIT {
                         .param("ids", a.toString(), b.toString(), UUID.randomUUID().toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[?(@.productId == '" + a + "')].available").value(3))
-                .andExpect(jsonPath("$[?(@.productId == '" + b + "')].available").value(9));
+                .andExpect(jsonPath("$[?(@.skuId == '" + a + "')].available").value(3))
+                .andExpect(jsonPath("$[?(@.skuId == '" + b + "')].available").value(9));
 
         String tooMany = String.join(",", Collections.nCopies(101, UUID.randomUUID().toString()));
         mvc.perform(get("/api/inventory/batch").param("ids", tooMany))
@@ -119,7 +119,9 @@ class InventoryMessagingIT extends AbstractInventoryIT {
     }
 
     private void send(String type, String routingKey, UUID eventId, UUID sagaId, Object payload) throws Exception {
-        EventEnvelope envelope = new EventEnvelope(eventId, type, 1, Instant.now(), "Order", sagaId.toString(),
+        // ReserveInventory v2 (dòng hàng theo skuId); Commit/Release vẫn là v1.
+        int version = "ReserveInventory".equals(type) ? 2 : 1;
+        EventEnvelope envelope = new EventEnvelope(eventId, type, version, Instant.now(), "Order", sagaId.toString(),
                 "corr-" + sagaId, null, sagaId.toString(), objectMapper.valueToTree(payload));
         Message message = MessageBuilder.withBody(objectMapper.writeValueAsBytes(envelope))
                 .setContentType(MessageProperties.CONTENT_TYPE_JSON)

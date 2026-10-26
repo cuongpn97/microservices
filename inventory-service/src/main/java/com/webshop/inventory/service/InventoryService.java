@@ -25,13 +25,13 @@ public interface InventoryService {
 
     // ---- HTTP API ----
 
-    StockResponse getStock(UUID productId);
+    StockResponse getStock(UUID skuId);
 
     /** Sản phẩm chưa có dòng tồn kho bị bỏ qua thay vì 404 cả lô. */
-    List<StockResponse> getStocks(List<UUID> productIds);
+    List<StockResponse> getStocks(List<UUID> skuIds);
 
     /** Thiết lập tồn kho (ADMIN). Chưa có dòng → tạo mới; không được thấp hơn lượng đang giữ chỗ (409). */
-    StockResponse setStock(UUID productId, int stockOnHand);
+    StockResponse setStock(UUID skuId, int stockOnHand);
 
     ReservationResponse getReservation(UUID reservationId);
 }

@@ -44,7 +44,7 @@ public class Cart {
 
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "cart_item", joinColumns = @JoinColumn(name = "user_id"))
-    @MapKeyColumn(name = "product_id")
+    @MapKeyColumn(name = "sku_id")
     @Column(name = "quantity")
     @Getter(AccessLevel.NONE) // tự viết getItems() bên dưới: trả bản chỉ-đọc, mọi thay đổi phải qua add/set/remove
     private Map<UUID, Integer> items = new HashMap<>();
@@ -54,26 +54,26 @@ public class Cart {
         this.updatedAt = now;
     }
 
-    public void add(UUID productId, int quantity, Instant now) {
+    public void add(UUID skuId, int quantity, Instant now) {
         requirePositive(quantity);
-        int newQuantity = items.getOrDefault(productId, 0) + quantity;
-        set(productId, newQuantity, now);
+        int newQuantity = items.getOrDefault(skuId, 0) + quantity;
+        set(skuId, newQuantity, now);
     }
 
-    public void set(UUID productId, int quantity, Instant now) {
+    public void set(UUID skuId, int quantity, Instant now) {
         requirePositive(quantity);
         if (quantity > MAX_QUANTITY_PER_ITEM) {
             throw new IllegalArgumentException("quantity must be <= " + MAX_QUANTITY_PER_ITEM);
         }
-        if (!items.containsKey(productId) && items.size() >= MAX_DISTINCT_ITEMS) {
-            throw new IllegalArgumentException("cart cannot contain more than " + MAX_DISTINCT_ITEMS + " products");
+        if (!items.containsKey(skuId) && items.size() >= MAX_DISTINCT_ITEMS) {
+            throw new IllegalArgumentException("cart cannot contain more than " + MAX_DISTINCT_ITEMS + " SKUs");
         }
-        items.put(productId, quantity);
+        items.put(skuId, quantity);
         touch(now);
     }
 
-    public void remove(UUID productId, Instant now) {
-        if (items.remove(productId) != null) {
+    public void remove(UUID skuId, Instant now) {
+        if (items.remove(skuId) != null) {
             touch(now);
         }
     }
@@ -86,7 +86,7 @@ public class Cart {
     }
 
     /**
-     * Áp dụng đơn hàng đã CONFIRMED: trừ đúng số lượng đã mua. Sản phẩm/số lượng thêm vào SAU lúc checkout
+     * Áp dụng đơn hàng đã CONFIRMED: trừ đúng số lượng đã mua. SKU/số lượng thêm vào SAU lúc checkout
      * vẫn được giữ lại (không xóa "mù" toàn bộ giỏ).
      */
     public void removePurchased(Map<UUID, Integer> purchased, Instant now) {

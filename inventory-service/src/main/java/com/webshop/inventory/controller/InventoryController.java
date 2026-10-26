@@ -26,20 +26,20 @@ public class InventoryController {
 
     private final InventoryService inventoryService;
 
-    @GetMapping("/{productId}")
-    public StockResponse get(@PathVariable UUID productId) {
-        return inventoryService.getStock(productId);
+    @GetMapping("/{skuId}")
+    public StockResponse get(@PathVariable UUID skuId) {
+        return inventoryService.getStock(skuId);
     }
 
-    /** Tồn kho của nhiều sản phẩm một lần (trang cửa hàng dùng) — tránh N lời gọi HTTP mỗi lượt tải. */
+    /** Tồn kho của nhiều SKU một lần (trang sản phẩm/giỏ hàng dùng) — tránh N lời gọi HTTP mỗi lượt tải. */
     @GetMapping("/batch")
     public List<StockResponse> batch(@RequestParam @Size(min = 1, max = 100) List<UUID> ids) {
         return inventoryService.getStocks(ids);
     }
 
     /** ADMIN — chặn ở SecurityConfig (PUT /api/inventory/**). */
-    @PutMapping("/{productId}")
-    public StockResponse setStock(@PathVariable UUID productId, @Valid @RequestBody SetStockRequest request) {
-        return inventoryService.setStock(productId, request.stockOnHand());
+    @PutMapping("/{skuId}")
+    public StockResponse setStock(@PathVariable UUID skuId, @Valid @RequestBody SetStockRequest request) {
+        return inventoryService.setStock(skuId, request.stockOnHand());
     }
 }

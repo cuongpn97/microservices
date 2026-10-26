@@ -56,9 +56,9 @@ public class Reservation {
     @Version
     private long version;
 
-    /** Sắp theo productId để thứ tự khóa dòng tồn kho luôn cố định (tránh deadlock). */
+    /** Sắp theo skuId để thứ tự khóa dòng tồn kho luôn cố định (tránh deadlock). */
     public List<ReservationLine> getLines() {
-        return lines.stream().sorted(Comparator.comparing(ReservationLine::getProductId)).toList();
+        return lines.stream().sorted(Comparator.comparing(ReservationLine::getSkuId)).toList();
     }
 
     public void markReserved(List<ReservationLine> reservedLines, Instant now) {
