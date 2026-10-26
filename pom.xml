@@ -46,6 +46,8 @@
         <!-- lombok.version đã được Spring Boot BOM quản lý; MapStruct thì không, nên phải pin ở đây -->
         <mapstruct.version>1.6.3</mapstruct.version>
         <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
+        <!-- AWS SDK v2 (S3) — product-service lưu ảnh trên object storage qua S3 API -->
+        <awssdk.version>2.57.3</awssdk.version>
     </properties>
 
     <dependencyManagement>
@@ -61,6 +63,13 @@
                 <groupId>io.github.resilience4j</groupId>
                 <artifactId>resilience4j-bom</artifactId>
                 <version>${resilience4j.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${awssdk.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>

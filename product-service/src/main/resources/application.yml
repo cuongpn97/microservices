@@ -13,8 +13,31 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+    properties:
+      hibernate:
+        # Danh sách N sản phẩm → nạp skus/images của cả trang bằng vài query "IN (...)" thay vì N query (N+1).
+        default_batch_fetch_size: 50
   flyway:
     enabled: true
+  servlet:
+    multipart:
+      # Khớp webshop.storage.max-image-size; gateway cho route upload 6MB (phần dư cho header multipart).
+      max-file-size: ${MAX_IMAGE_SIZE:5MB}
+      max-request-size: 6MB
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:webshop}
+    password: ${RABBITMQ_PASSWORD}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 10
+        default-requeue-rejected: false
 
 management:
   endpoints:
@@ -35,3 +58,18 @@ webshop:
     jwt:
       secret: ${JWT_SECRET}
       issuer: ${JWT_ISSUER:webshop-auth}
+  storage:
+    # Ghi qua mạng nội bộ; đọc (trình duyệt) qua public-base-url. Xem StorageProperties.
+    endpoint: ${STORAGE_ENDPOINT:http://localhost:8333}
+    public-base-url: ${STORAGE_PUBLIC_BASE_URL:http://localhost:8333/product-images}
+    bucket: ${STORAGE_BUCKET:product-images}
+    region: ${STORAGE_REGION:us-east-1}
+    access-key: ${STORAGE_ACCESS_KEY:webshop}
+    secret-key: ${STORAGE_SECRET_KEY}
+    max-image-size: ${MAX_IMAGE_SIZE:5MB}
+  messaging:
+    retry:
+      max-attempts: ${MESSAGE_RETRY_MAX_ATTEMPTS:4}
+      initial-delay: ${MESSAGE_RETRY_INITIAL_DELAY:1s}
+      multiplier: ${MESSAGE_RETRY_MULTIPLIER:3}
+      max-delay: ${MESSAGE_RETRY_MAX_DELAY:30s}

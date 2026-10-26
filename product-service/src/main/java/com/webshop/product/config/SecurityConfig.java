@@ -20,11 +20,13 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // Quản trị catalog (kể cả GET danh sách gồm bản nháp): chỉ ADMIN. Phải đứng TRƯỚC rule GET công
+                        // khai bên dưới — rule nào khớp trước thắng. Controller kiểm tra thêm bằng @PreAuthorize.
+                        .requestMatchers("/api/products/manage/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
                         .requestMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
                         .requestMatchers(HttpMethod.GET, OpenApiConfig.DOC_PATHS).permitAll()
-                        .requestMatchers("/actuator/**").hasRole("ADMIN")
-                        // Ghi dữ liệu sản phẩm: chỉ ADMIN (kiểm tra thêm bằng @PreAuthorize ở controller).
+                        .requestMatchers("/admin/**", "/actuator/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt ->
                         jwt.jwtAuthenticationConverter(WebshopJwt.authenticationConverter())));
