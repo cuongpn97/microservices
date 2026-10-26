@@ -33,6 +33,7 @@
         <module>payment-service</module>
         <module>order-service</module>
         <module>search-service</module>
+        <module>review-service</module>
     </modules>
 
     <properties>
