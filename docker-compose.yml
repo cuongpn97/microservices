@@ -1,4 +1,4 @@
-# Môi trường local đầy đủ: 1 PostgreSQL (6 database tách biệt), 1 RabbitMQ, 7 ứng dụng.
+# Môi trường local đầy đủ: 1 PostgreSQL (7 database tách biệt), 1 RabbitMQ, 1 SeaweedFS (ảnh sản phẩm, S3 API), 8 service + 2 UI.
 #   cp .env.example .env
 #   ./mvnw -B package -DskipTests
 #   docker compose up -d --build
@@ -41,6 +41,7 @@ services:
       INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD}
       PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD}
       ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD}
+      REVIEW_DB_PASSWORD: ${REVIEW_DB_PASSWORD}
       CDC_DB_PASSWORD: ${CDC_DB_PASSWORD:-}
     volumes:
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -69,6 +70,30 @@ services:
       timeout: 5s
       retries: 30
 
+  # Object storage tương thích S3 cho ảnh sản phẩm (SeaweedFS, Apache 2.0). MinIO đã ngừng phát hành image cộng đồng
+  # (cuối 2025), nên dùng SeaweedFS — product-service chỉ nói S3 API, đổi nhà cung cấp không đổi code.
+  # Quyền: start.sh sinh định danh từ S3_ACCESS_KEY/S3_SECRET_KEY (ghi) + anonymous chỉ ĐỌC bucket ảnh.
+  # Bucket do product-service tự tạo lúc khởi động.
+  object-storage:
+    image: chrislusf/seaweedfs:4.50
+    entrypoint: ["sh", "/seaweedfs/start.sh"]
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: product-images
+    ports:
+      - "8333:8333"   # S3 API — trình duyệt tải ảnh trực tiếp từ đây
+    volumes:
+      - ./infra/seaweedfs:/seaweedfs:ro
+      - objectdata:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8333/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   auth-service:
     <<: *service-common
     build: ./auth-service
@@ -86,11 +111,23 @@ services:
   product-service:
     <<: *service-common
     build: ./product-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      object-storage:
+        condition: service_healthy
     environment:
       <<: *service-env
       DB_URL: jdbc:postgresql://postgres:5432/product_db
       DB_USERNAME: product_user
       DB_PASSWORD: ${PRODUCT_DB_PASSWORD}
+      # Ghi qua mạng nội bộ compose; trình duyệt đọc ảnh qua cổng 8333 đã publish ra host.
+      STORAGE_ENDPOINT: http://object-storage:8333
+      STORAGE_PUBLIC_BASE_URL: ${STORAGE_PUBLIC_BASE_URL:-http://localhost:8333/product-images}
+      STORAGE_ACCESS_KEY: ${S3_ACCESS_KEY}
+      STORAGE_SECRET_KEY: ${S3_SECRET_KEY}
     ports:
       - "8082:8082"
 
@@ -140,6 +177,17 @@ services:
     ports:
       - "8086:8086"
 
+  review-service:
+    <<: *service-common
+    build: ./review-service
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:postgresql://postgres:5432/review_db
+      DB_USERNAME: review_user
+      DB_PASSWORD: ${REVIEW_DB_PASSWORD}
+    ports:
+      - "8088:8088"
+
   api-gateway:
     build: ./api-gateway
     restart: unless-stopped
@@ -148,7 +196,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_ISSUER: ${JWT_ISSUER:-webshop-auth}
       LOGGING_STRUCTURED_FORMAT_CONSOLE: ${LOG_FORMAT:-ecs}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
       AUTH_SERVICE_URL: http://auth-service:8081
       PRODUCT_SERVICE_URL: http://product-service:8082
       CART_SERVICE_URL: http://cart-service:8083
@@ -156,6 +204,7 @@ services:
       PAYMENT_SERVICE_URL: http://payment-service:8085
       ORDER_SERVICE_URL: http://order-service:8086
       SEARCH_SERVICE_URL: http://search-service:8087
+      REVIEW_SERVICE_URL: http://review-service:8088
     ports:
       - "8080:8080"
     depends_on:
@@ -165,10 +214,24 @@ services:
       - inventory-service
       - payment-service
       - order-service
+      - review-service
 
-  # Giao diện demo (Next.js). BFF bên trong gọi gateway và các endpoint /admin/** qua mạng nội bộ Docker.
-  webshop-ui:
-    build: ./webshop-ui
+  # Cửa hàng cho khách (Next.js). BFF chỉ chuyển tiếp tới API Gateway — không có đường tắt nào vào service.
+  storefront-ui:
+    build: ./storefront-ui
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      GATEWAY_URL: http://api-gateway:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api-gateway
+
+  # Backoffice cho nhân viên (Next.js): quản lý catalog/tồn kho/đánh giá qua gateway, và các trang vận hành gọi thẳng
+  # /admin/** của từng service qua mạng nội bộ Docker (gateway cố ý không route /admin).
+  backoffice-ui:
+    build: ./backoffice-ui
     restart: unless-stopped
     mem_limit: 256m
     environment:
@@ -179,11 +242,12 @@ services:
       INVENTORY_SERVICE_URL: http://inventory-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
       ORDER_SERVICE_URL: http://order-service:8086
+      REVIEW_SERVICE_URL: http://review-service:8088
       RABBITMQ_MANAGEMENT_URL: http://rabbitmq:15672
       RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
     ports:
-      - "3000:3000"
+      - "3001:3000"
     depends_on:
       - api-gateway
 
@@ -314,3 +378,4 @@ volumes:
   pgdata:
   rabbitdata:
   esdata:
+  objectdata:

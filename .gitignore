@@ -5,3 +5,9 @@ target/
 .idea/shelf/
 *.log
 .gstack/
+
+# Next.js / Node (lưới an toàn cho mọi app UI; mỗi app vẫn có .gitignore riêng)
+node_modules/
+.next/
+*.tsbuildinfo
+next-env.d.ts
