@@ -1,18 +1,31 @@
 package com.webshop.search.entity;
 
+import java.util.List;
+
 /**
- * Nội dung một sản phẩm cần ghi vào index — dựng từ ảnh dòng (row image) của bảng products trong event CDC.
+ * Nội dung một SPU cần ghi vào index — đọc từ cột payload của bảng catalog_document (product-service) trong event CDC.
  * Không phải JPA entity: service này không có DB quan hệ, "kho dữ liệu" là Elasticsearch.
  *
- * @param version   cột @Version của bảng products — dùng để bỏ qua bản cũ đến muộn (chống ghi lùi).
- * @param updatedAt giữ nguyên chuỗi Debezium gửi, không parse.
+ * @param minPriceVnd giá thấp nhất trong các SKU bán được; null khi chưa có SKU nào bán được.
+ * @param version     cột version của catalog_document (tăng mỗi lần ghi) — dùng để bỏ qua bản cũ đến muộn.
+ * @param updatedAt   giữ nguyên chuỗi product-service gửi, không parse.
  */
 public record ProductDocument(
         String id,
+        String slug,
         String name,
+        String brand,
+        String shortDescription,
         String description,
-        long priceVnd,
         boolean active,
+        Long minPriceVnd,
+        Long maxPriceVnd,
+        String imageUrl,
+        Double ratingAvg,
+        int ratingCount,
+        List<String> skuCodes,
+        List<String> optionValues,
+        int sellableSkuCount,
         long version,
         String updatedAt) {
 }

@@ -42,27 +42,28 @@ public class ProductSearchRepository {
 
         if (query.hasText()) {
             String q = query.q();
-            // Hai cách khớp, lấy điểm cao hơn: từ đầy đủ (cho phép gõ sai 1-2 ký tự) và tiền tố khi đang gõ dở.
             bool.must(m -> m.bool(b -> b
+                    // Từ có thể nằm ở các field khác nhau ("áo thun" ở tên, "đen" ở giá trị option) → cross_fields.
                     .should(s -> s.multiMatch(mm -> mm.query(q)
-                            .fields("name^3", "description")
-                            .type(TextQueryType.BestFields)
-                            .operator(Operator.And)
-                            .fuzziness("AUTO")))
+                            .fields("name^3", "brand^2", "optionValues^2", "shortDescription", "description")
+                            .type(TextQueryType.CrossFields)
+                            .operator(Operator.And)))
+                    // Gõ sai 1-2 ký tự trong tên (cross_fields không hỗ trợ fuzziness nên tách riêng).
+                    .should(s -> s.match(mt -> mt.field("name").query(q).operator(Operator.And).fuzziness("AUTO")))
+                    // Gõ dở (tiền tố).
                     .should(s -> s.match(mt -> mt.field("name.prefix").query(q).operator(Operator.And)))
+                    // Đúng mã SKU (KB87-RED) → ưu tiên cao nhất.
+                    .should(s -> s.term(t -> t.field("skuCodes").value(q).boost(5f)))
                     .minimumShouldMatch("1")));
         }
-        if (query.minPriceVnd() != null || query.maxPriceVnd() != null) {
-            bool.filter(f -> f.range(r -> r.number(n -> {
-                n.field("priceVnd");
-                if (query.minPriceVnd() != null) {
-                    n.gte(query.minPriceVnd().doubleValue());
-                }
-                if (query.maxPriceVnd() != null) {
-                    n.lte(query.maxPriceVnd().doubleValue());
-                }
-                return n;
-            })));
+        // Khoảng giá của SPU [min, max] GIAO với khoảng lọc: có ít nhất một biến thể có thể nằm trong khoảng.
+        if (query.minPriceVnd() != null) {
+            double min = query.minPriceVnd().doubleValue();
+            bool.filter(f -> f.range(r -> r.number(n -> n.field("maxPriceVnd").gte(min))));
+        }
+        if (query.maxPriceVnd() != null) {
+            double max = query.maxPriceVnd().doubleValue();
+            bool.filter(f -> f.range(r -> r.number(n -> n.field("minPriceVnd").lte(max))));
         }
 
         try {
@@ -85,10 +86,9 @@ public class ProductSearchRepository {
     private static List<SortOptions> sort(SearchSort sort, boolean hasText) {
         SortOptions byName = SortOptions.of(o -> o.field(f -> f.field("name.sort").order(SortOrder.Asc)));
         return switch (sort) {
-            case PRICE_ASC -> List.of(SortOptions.of(o -> o.field(f -> f.field("priceVnd").order(SortOrder.Asc))),
-                    byName);
-            case PRICE_DESC -> List.of(SortOptions.of(o -> o.field(f -> f.field("priceVnd").order(SortOrder.Desc))),
-                    byName);
+            case PRICE_ASC -> List.of(by("minPriceVnd", SortOrder.Asc), byName);
+            case PRICE_DESC -> List.of(by("maxPriceVnd", SortOrder.Desc), byName);
+            case RATING -> List.of(by("ratingAvg", SortOrder.Desc), by("ratingCount", SortOrder.Desc), byName);
             case NAME -> List.of(byName);
             // Không có từ khóa thì điểm liên quan đều bằng nhau → sắp theo tên cho ổn định giữa các trang.
             case RELEVANCE -> hasText ? List.of(SortOptions.of(o -> o.score(sc -> sc.order(SortOrder.Desc))), byName)
@@ -96,11 +96,23 @@ public class ProductSearchRepository {
         };
     }
 
+    /** SPU chưa có giá/đánh giá (field null) luôn xếp cuối, bất kể chiều sắp xếp. */
+    private static SortOptions by(String field, SortOrder order) {
+        return SortOptions.of(o -> o.field(f -> f.field(field).order(order).missing("_last")));
+    }
+
     @SuppressWarnings("unchecked")
     private static ProductSearchHit toHit(Hit<Map> hit) {
         Map<String, Object> src = hit.source() == null ? Map.of() : hit.source();
-        Number price = (Number) src.get("priceVnd");
-        return new ProductSearchHit(hit.id(), (String) src.get("name"), (String) src.get("description"),
-                price == null ? 0 : price.longValue(), hit.score());
+        return new ProductSearchHit(hit.id(), (String) src.get("slug"), (String) src.get("name"),
+                (String) src.get("brand"), (String) src.get("shortDescription"),
+                asLong(src.get("minPriceVnd")), asLong(src.get("maxPriceVnd")), (String) src.get("imageUrl"),
+                src.get("ratingAvg") instanceof Number n ? n.doubleValue() : null,
+                src.get("ratingCount") instanceof Number n ? n.intValue() : 0,
+                hit.score());
+    }
+
+    private static Long asLong(Object value) {
+        return value instanceof Number n ? n.longValue() : null;
     }
 }

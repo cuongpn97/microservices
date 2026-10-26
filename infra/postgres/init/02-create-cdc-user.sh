@@ -4,7 +4,7 @@
 # Quyền tối thiểu:
 #   - REPLICATION: mở replication slot để đọc WAL (logical decoding, plugin pgoutput).
 #   - CONNECT chỉ vào product_db — không đọc được database khác.
-#   - SELECT chỉ trên bảng được CDC (products): do Flyway của chính service đó GRANT
+#   - SELECT chỉ trên bảng được CDC (catalog_document): do Flyway của chính service đó GRANT
 #     (bảng chưa tồn tại lúc script này chạy). Publication cũng do Flyway tạo vì chỉ OWNER của bảng mới tạo được.
 #
 # Volume đã có dữ liệu (script này không tự chạy lại) → chạy tay một lần, xem README mục "Search (CDC)".

@@ -76,6 +76,25 @@ public record ChangeEvent(Operation op, JsonNode before, JsonNode after) {
         return node.asLong();
     }
 
+    /**
+     * Cột JSONB. Debezium (PostgreSQL connector) gửi jsonb dưới dạng CHUỖI JSON (kiểu io.debezium.data.Json), không
+     * phải object lồng → parse lại. Chấp nhận cả object để không phụ thuộc cấu hình converter.
+     */
+    public JsonNode requiredJson(ObjectMapper mapper, String field) {
+        JsonNode node = row().get(field);
+        if (node == null || node.isNull()) {
+            throw new MalformedChangeEventException("Missing field " + field);
+        }
+        if (node.isObject()) {
+            return node;
+        }
+        try {
+            return mapper.readTree(node.asText());
+        } catch (Exception e) {
+            throw new MalformedChangeEventException("Invalid JSON in field " + field, e);
+        }
+    }
+
     public boolean requiredBoolean(String field) {
         JsonNode node = row().get(field);
         if (node == null || !node.isBoolean()) {

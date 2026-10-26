@@ -10,7 +10,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 /**
- * Consumer CDC của bảng products (topic do Debezium ghi). Lỗi được xử lý ở KafkaConfig: lỗi tạm thời retry mãi,
+ * Consumer CDC của bảng catalog_document (topic do Debezium ghi). Lỗi được xử lý ở KafkaConfig: lỗi tạm thời retry mãi,
  * message hỏng đi thẳng DLT.
  *
  * <p>Thứ tự: Debezium dùng khóa chính làm key Kafka → mọi thay đổi của MỘT sản phẩm nằm cùng partition và đến

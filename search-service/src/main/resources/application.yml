@@ -57,6 +57,7 @@ webshop:
     # Index thật có version; ứng dụng chỉ đọc/ghi qua alias → đổi mapping bằng cách dựng index mới rồi chuyển alias.
     index-alias: products
     # v2: bỏ các trường tồn kho — search không lọc/sắp xếp theo tồn kho (docs/design-decisions.md mục 12).
-    index-name: products-v2
+    # v3: một document = một SPU, dựng từ catalog_document (giá min/max qua SKU, ảnh, rating) — mục 13.
+    index-name: products-v3
     topics:
-      products: ${CDC_TOPIC_PRODUCTS:cdc.product.public.products}
+      products: ${CDC_TOPIC_PRODUCTS:cdc.catalog.public.catalog_document}

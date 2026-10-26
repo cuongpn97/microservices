@@ -17,24 +17,33 @@ import java.util.Map;
  * Ghi vào index Elasticsearch (phía GHI của read model). Mỗi thao tác là MỘT update có script chạy trên server
  * Elasticsearch — kiểm tra và ghi trong cùng một bước, tương tự "UPDATE ... WHERE" có điều kiện bên SQL.
  *
- * <p>Chống ghi lùi: bản có {@code version} NHỎ HƠN bản đang có bị bỏ qua (noop) — bảo vệ khi replay đè lên dữ liệu
- * mới hơn. Cho phép version BẰNG: UPDATE bằng SQL thô không tăng version, nhưng trong cùng partition bản đến sau
- * luôn mới hơn.</p>
+ * <p>Chống ghi lùi: bản có {@code version} (của catalog_document) NHỎ HƠN bản đang có bị bỏ qua (noop) — bảo vệ khi
+ * replay đè lên dữ liệu mới hơn. Cho phép version BẰNG: trong cùng partition bản đến sau luôn mới hơn.</p>
  */
 @Repository
 public class ProductIndexRepository {
 
     private static final String UPSERT_PRODUCT = """
             if (ctx._source.deleted == true) { ctx.op = 'noop'; return; }
-            if (ctx._source.productVersion != null && params.version < ctx._source.productVersion) {
+            if (ctx._source.docVersion != null && params.version < ctx._source.docVersion) {
               ctx.op = 'noop'; return;
             }
             ctx._source.productId = params.id;
+            ctx._source.slug = params.slug;
             ctx._source.name = params.name;
+            ctx._source.brand = params.brand;
+            ctx._source.shortDescription = params.shortDescription;
             ctx._source.description = params.description;
-            ctx._source.priceVnd = params.priceVnd;
+            ctx._source.optionValues = params.optionValues;
+            ctx._source.skuCodes = params.skuCodes;
+            ctx._source.minPriceVnd = params.minPriceVnd;
+            ctx._source.maxPriceVnd = params.maxPriceVnd;
+            ctx._source.imageUrl = params.imageUrl;
+            ctx._source.ratingAvg = params.ratingAvg;
+            ctx._source.ratingCount = params.ratingCount;
+            ctx._source.sellableSkuCount = params.sellableSkuCount;
             ctx._source.active = params.active;
-            ctx._source.productVersion = params.version;
+            ctx._source.docVersion = params.version;
             ctx._source.productUpdatedAt = params.updatedAt;
             """;
 
@@ -61,9 +70,19 @@ public class ProductIndexRepository {
     public String upsert(ProductDocument document) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("id", document.id());
+        params.put("slug", document.slug());
         params.put("name", document.name());
+        params.put("brand", document.brand());
+        params.put("shortDescription", document.shortDescription());
         params.put("description", document.description());
-        params.put("priceVnd", document.priceVnd());
+        params.put("optionValues", document.optionValues());
+        params.put("skuCodes", document.skuCodes());
+        params.put("minPriceVnd", document.minPriceVnd());
+        params.put("maxPriceVnd", document.maxPriceVnd());
+        params.put("imageUrl", document.imageUrl());
+        params.put("ratingAvg", document.ratingAvg());
+        params.put("ratingCount", document.ratingCount());
+        params.put("sellableSkuCount", document.sellableSkuCount());
         params.put("active", document.active());
         params.put("version", document.version());
         params.put("updatedAt", document.updatedAt());
@@ -77,7 +96,13 @@ public class ProductIndexRepository {
 
     private String apply(String id, String script, Map<String, Object> params) {
         Map<String, JsonData> jsonParams = new LinkedHashMap<>();
-        params.forEach((k, v) -> jsonParams.put(k, JsonData.of(v)));
+        // JsonData.of(null) không hợp lệ → field null (chưa có giá, chưa có ảnh...) được bỏ qua: trong script
+        // params.x trả null cho key không tồn tại, đúng ý nghĩa "không có giá trị".
+        params.forEach((k, v) -> {
+            if (v != null) {
+                jsonParams.put(k, JsonData.of(v));
+            }
+        });
         try {
             UpdateResponse<Map> response = elasticsearchClient.update(u -> u
                     // Ghi vào index THẬT, không qua alias: khi đang dựng lại index mới, alias vẫn trỏ index cũ.

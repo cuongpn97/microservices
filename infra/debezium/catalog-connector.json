@@ -9,11 +9,11 @@
   "database.password": "${env:CDC_DB_PASSWORD}",
   "database.dbname": "product_db",
 
-  "topic.prefix": "cdc.product",
-  "table.include.list": "public.products",
-  "publication.name": "dbz_product",
+  "topic.prefix": "cdc.catalog",
+  "table.include.list": "public.catalog_document",
+  "publication.name": "dbz_catalog",
   "publication.autocreate.mode": "disabled",
-  "slot.name": "dbz_product",
+  "slot.name": "dbz_catalog",
   "snapshot.mode": "initial",
 
   "heartbeat.interval.ms": "10000",

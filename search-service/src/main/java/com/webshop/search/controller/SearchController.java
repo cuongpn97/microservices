@@ -26,9 +26,10 @@ public class SearchController {
     private final ProductSearchService productSearchService;
 
     @GetMapping("/products")
-    @Operation(summary = "Tìm sản phẩm theo từ khóa (không phân biệt dấu), lọc theo khoảng giá",
+    @Operation(summary = "Tìm sản phẩm (SPU) theo từ khóa/mã SKU (không phân biệt dấu), lọc theo khoảng giá",
             description = "Dữ liệu có thể trễ vài giây so với Product Service; giá ở đây chỉ để hiển thị (checkout luôn đọc "
-                    + "lại giá). Không trả tồn kho — lấy từ GET /api/inventory/batch cho các sản phẩm đang hiển thị.")
+                    + "lại giá SKU). Lọc giá: SPU có khoảng giá [min, max] giao với khoảng lọc. Không trả tồn kho — "
+                    + "lấy từ GET /api/inventory/batch theo skuId khi người dùng mở trang sản phẩm.")
     public ProductSearchResponse products(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) @PositiveOrZero Long minPriceVnd,

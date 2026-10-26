@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Quản lý index theo kiểu blue/green:
  * <ul>
- *   <li>GHI luôn vào index thật ({@code products-v2}); ĐỌC luôn qua alias ({@code products}).</li>
+ *   <li>GHI luôn vào index thật ({@code products-v3}); ĐỌC luôn qua alias ({@code products}).</li>
  *   <li>Khởi động với index mới (đổi mapping): tạo index rỗng, consumer group mới replay topic vào đó, alias vẫn trỏ
  *       index cũ → người dùng vẫn tìm được đầy đủ. Khi listener báo idle (đã đọc hết topic) mới chuyển alias, nguyên tử.</li>
  *   <li>Chưa có alias (cài mới): gắn alias ngay — không có gì để bảo vệ.</li>

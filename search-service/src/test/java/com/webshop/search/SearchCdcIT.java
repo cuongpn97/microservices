@@ -45,7 +45,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class SearchCdcIT {
 
-    static final String PRODUCTS = "cdc.product.public.products";
+    static final String PRODUCTS = "cdc.catalog.public.catalog_document";
 
     static final ElasticsearchContainer ELASTIC = start(new ElasticsearchContainer(
             "docker.elastic.co/elasticsearch/elasticsearch:8.18.8")
@@ -74,6 +74,8 @@ class SearchCdcIT {
     KafkaListenerEndpointRegistry listeners;
     @Autowired
     ConsumerFactory<?, ?> consumerFactory;
+    @Autowired
+    com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Test
     void snapshotRowIsSearchableIgnoringVietnameseDiacriticsAndByPrefix() throws Exception {
@@ -95,13 +97,13 @@ class SearchCdcIT {
         String id = UUID.randomUUID().toString();
         String tag = tag();
         product(id, "u", "Laptop " + tag + " v5", 20_000_000, true, 5);
-        awaitSearch(tag, r -> r.andExpect(jsonPath("$.items[0].priceVnd").value(20_000_000)));
+        awaitSearch(tag, r -> r.andExpect(jsonPath("$.items[0].minPriceVnd").value(20_000_000)));
 
         // Ví dụ reset offset để replay: bản v2 (cũ) đến SAU v5 → bị bỏ qua. Bản v6 đến sau đó vẫn được áp dụng.
         product(id, "u", "Laptop " + tag + " v2", 9_000_000, true, 2);
         product(id, "u", "Laptop " + tag + " v6", 21_000_000, true, 6);
-        awaitSearch(tag, r -> r.andExpect(jsonPath("$.items[0].priceVnd").value(21_000_000)));
-        assertThat(source(id).get("productVersion")).isEqualTo(6);
+        awaitSearch(tag, r -> r.andExpect(jsonPath("$.items[0].minPriceVnd").value(21_000_000)));
+        assertThat(source(id).get("docVersion")).isEqualTo(6);
     }
 
     @Test
@@ -112,7 +114,7 @@ class SearchCdcIT {
         String oldIndex = "old-" + tag();
         elastic.indices().create(c -> c.index(oldIndex).aliases(alias, a -> a));
         ProductIndexBootstrap upgrade = new ProductIndexBootstrap(elastic,
-                new SearchProperties(alias, "products-v2", new SearchProperties.Topics(PRODUCTS)));
+                new SearchProperties(alias, "products-v3", new SearchProperties.Topics(PRODUCTS)));
 
         upgrade.afterPropertiesSet();
         assertThat(upgrade.isAliasReady()).isFalse();
@@ -120,7 +122,7 @@ class SearchCdcIT {
 
         upgrade.onListenerIdle(null);
         assertThat(upgrade.isAliasReady()).isTrue();
-        assertThat(aliasTargets(alias)).containsExactly("products-v2");
+        assertThat(aliasTargets(alias)).containsExactly("products-v3");
     }
 
     @Test
@@ -171,10 +173,30 @@ class SearchCdcIT {
     void consumerGroupFollowsIndexVersionAndConsumerNeverCreatesTopics() {
         // Group theo version index → đổi index = group mới = replay từ đầu. (id của @KafkaListener KHÔNG được ghi đè.)
         assertThat(listeners.getListenerContainer("cdc-products").getGroupId())
-                .isEqualTo("search-indexer-products-v2");
+                .isEqualTo("search-indexer-products-v3");
         // Topic phải do Debezium tạo (compacted, đủ partition), không phải consumer tạo với cấu hình mặc định.
         assertThat(String.valueOf(consumerFactory.getConfigurationProperties()
                 .get(ConsumerConfig.ALLOW_AUTO_CREATE_TOPICS_CONFIG))).isEqualTo("false");
+    }
+
+    @Test
+    void variantValuesSkuCodesAndOverlappingPriceRangesAreSearchable() throws Exception {
+        String id = UUID.randomUUID().toString();
+        String tag = tag();
+        String code = "TEE-" + tag.toUpperCase();
+        document(id, "r", "Áo thun " + tag, 199_000, 219_000, true, 0, List.of(code), List.of("Đen", "Trắng", "XL"));
+
+        // "áo đen": "áo" ở tên, "đen" ở giá trị option → vẫn khớp (cross_fields), không dấu vẫn khớp.
+        awaitSearch("ao den " + tag, r -> r.andExpect(jsonPath("$.items[0].productId").value(id)));
+        // Gõ đúng mã SKU (không phân biệt hoa thường).
+        awaitSearch(code.toLowerCase(), r -> r.andExpect(jsonPath("$.items[0].productId").value(id)));
+        // Khoảng giá SPU [199k, 219k] giao [210k, 300k] → có; [220k, 300k] → không.
+        mvc.perform(get("/api/search/products").param("q", tag).param("minPriceVnd", "210000")
+                        .param("maxPriceVnd", "300000"))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].maxPriceVnd").value(219_000));
+        mvc.perform(get("/api/search/products").param("q", tag).param("minPriceVnd", "220000"))
+                .andExpect(jsonPath("$.totalElements").value(0));
     }
 
     @Test
@@ -190,16 +212,24 @@ class SearchCdcIT {
 
     private void product(String id, String op, String name, long price, boolean active, long version)
             throws Exception {
-        String row = """
-                {"id":"%s","name":"%s","description":"","price_vnd":%d,"active":%s,"created_at":"%s",\
-                "updated_at":"%s","version":%d}""".formatted(id, name, price, active, Instant.now(), Instant.now(),
-                version);
-        kafka.send(PRODUCTS, key(id), envelope(op, row)).get();
+        document(id, op, name, price, price, active, version, List.of(), List.of());
+    }
+
+    /** Dòng catalog_document: cột payload (jsonb) được Debezium gửi dưới dạng CHUỖI JSON. */
+    private void document(String id, String op, String name, long minPrice, long maxPrice, boolean active,
+                          long version, List<String> skuCodes, List<String> optionValues) throws Exception {
+        Map<String, Object> payload = new java.util.HashMap<>(Map.of("productId", id, "slug", "s-" + id,
+                "name", name, "description", "", "active", active, "minPriceVnd", minPrice, "maxPriceVnd", maxPrice,
+                "skuCodes", skuCodes, "optionValues", optionValues, "ratingCount", 0));
+        payload.put("updatedAt", Instant.now().toString());
+        Map<String, Object> row = Map.of("product_id", id, "version", version, "schema_version", 1,
+                "payload", objectMapper.writeValueAsString(payload), "updated_at", Instant.now().toString());
+        kafka.send(PRODUCTS, key(id), envelope(op, objectMapper.writeValueAsString(row))).get();
     }
 
     private void delete(String id) throws Exception {
         kafka.send(PRODUCTS, key(id), """
-                {"before":{"id":"%s"},"after":null,"op":"d","ts_ms":%d,"source":{}}"""
+                {"before":{"product_id":"%s"},"after":null,"op":"d","ts_ms":%d,"source":{}}"""
                 .formatted(id, System.currentTimeMillis())).get();
     }
 
@@ -210,7 +240,7 @@ class SearchCdcIT {
     }
 
     private static String key(String id) {
-        return "{\"id\":\"%s\"}".formatted(id);
+        return "{\"product_id\":\"%s\"}".formatted(id);
     }
 
     /** Từ khóa duy nhất cho mỗi test → các test dùng chung index không thấy dữ liệu của nhau. */
@@ -234,7 +264,7 @@ class SearchCdcIT {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> source(String id) throws Exception {
-        var response = elastic.get(g -> g.index("products").id(id), Map.class);
+        var response = elastic.get(g -> g.index("products-v3").id(id), Map.class);
         return response.found() ? (Map<String, Object>) response.source() : null;
     }
 }
