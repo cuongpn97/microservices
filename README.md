@@ -1,10 +1,12 @@
 # Webshop Microservices — dự án học tập
 
-Một webshop gồm 7 ứng dụng Spring Boot độc lập, được xây dựng để **đọc code và hiểu vì sao mỗi pattern tồn tại**:
-Database-per-service, API Gateway, JWT (defense in depth), Transactional Outbox, Inbox/idempotency, Saga orchestration
-có bồi hoàn, retry có backoff + jitter, DLQ, circuit breaker, khóa/cập nhật nguyên tử chống oversell/overspend.
+Một webshop gồm 9 ứng dụng Spring Boot độc lập và 2 giao diện Next.js, được xây dựng để **đọc code và hiểu vì sao mỗi
+pattern tồn tại**: Database-per-service, API Gateway, JWT (defense in depth), Transactional Outbox, Inbox/idempotency,
+Saga orchestration có bồi hoàn, retry có backoff + jitter, DLQ, circuit breaker, khóa/cập nhật nguyên tử chống
+oversell/overspend, CDC sang Elasticsearch, catalog SPU/SKU, ảnh trên object storage, đánh giá chỉ dành cho người đã mua.
 
-> **Giao diện demo:** http://localhost:3000 (Next.js, thư mục [`webshop-ui/`](webshop-ui/README.md)) ·
+> **Cửa hàng:** http://localhost:3000 ([`storefront-ui/`](storefront-ui/README.md)) ·
+> **Backoffice:** http://localhost:3001 ([`backoffice-ui/`](backoffice-ui/README.md)) ·
 > **Swagger UI tổng hợp:** http://localhost:8080/swagger-ui.html
 >
 > Tài liệu chi tiết:
@@ -32,10 +34,12 @@ có bồi hoàn, retry có backoff + jitter, DLQ, circuit breaker, khóa/cập n
 ├── payment-service/    :8085     # payment_db
 ├── order-service/      :8086     # order_db — Saga orchestrator
 ├── search-service/     :8087     # Elasticsearch read model, dựng từ CDC (profile "search")
-├── infra/postgres/init/          # tạo 6 database + 6 user (không quyền chéo) + user CDC
-├── infra/debezium/               # cấu hình connector Debezium + script đăng ký
+├── review-service/     :8088     # review_db — đánh giá (chỉ người đã mua), tóm tắt rating
+├── infra/postgres/init/          # tạo 7 database + 7 user (không quyền chéo) + user CDC
+├── infra/debezium/               # cấu hình connector Debezium (catalog_document) + script đăng ký
 ├── docker-compose.yml, .env.example
-├── webshop-ui/         :3000     # Giao diện demo Next.js 16 (BFF proxy, theo dõi Saga, trang quản trị)
+├── storefront-ui/      :3000     # Cửa hàng Next.js 16: danh mục, chọn biến thể, giỏ, theo dõi Saga, đánh giá
+├── backoffice-ui/      :3001     # Backoffice Next.js 16: SPU/SKU, ảnh, tồn kho, kiểm duyệt đánh giá, vận hành
 ├── scripts/                      # demo.sh, demo-failures.sh (bản dòng lệnh của các kịch bản)
 ├── http/                         # webshop.http (IntelliJ/VS Code), Postman collection
 └── docs/
@@ -53,8 +57,8 @@ Mỗi service: `src/main/resources/db/migration` (Flyway), `Dockerfile`, cấu h
 
 ```bash
 cp .env.example .env                       # giá trị LOCAL-ONLY, file .env bị .gitignore
-./mvnw -B package -DskipTests              # build 7 jar (Windows PowerShell: .\mvnw.cmd ...)
-docker compose up -d --build               # postgres, rabbitmq + 7 service
+./mvnw -B package -DskipTests              # build 9 jar (Windows PowerShell: .\mvnw.cmd ...)
+docker compose up -d --build               # postgres, rabbitmq, object storage (SeaweedFS) + 8 service + 2 UI
 docker compose ps                          # đợi tất cả (healthy) ~1-2 phút
 ```
 
@@ -62,10 +66,30 @@ Sau đó mở:
 
 | URL | Dùng để |
 |---|---|
-| http://localhost:3000 | **Giao diện demo**: đăng ký → mua hàng → xem Saga chạy từng bước; trang *Kịch bản demo* chạy tự động 6 tình huống; trang *Quản trị* (đăng nhập bằng `ADMIN_EMAIL`/`ADMIN_PASSWORD` trong `.env`) |
+| http://localhost:3000 | **Cửa hàng**: đăng ký → chọn màu/size → mua → xem Saga chạy từng bước → viết đánh giá; *Kịch bản demo* (link ở footer) chạy tự động 6 tình huống |
+| http://localhost:3001 | **Backoffice** (đăng nhập `ADMIN_EMAIL`/`ADMIN_PASSWORD` trong `.env`): tạo SPU, sinh SKU theo tổ hợp option, upload ảnh, đặt tồn kho, kiểm duyệt đánh giá, trang *Vận hành* (health, DLQ, Saga) |
 | http://localhost:8080/swagger-ui.html | **Swagger UI tổng hợp** qua gateway — chọn service ở ô *Select a definition* |
-| http://localhost:808x/swagger-ui.html | Swagger UI của từng service (8081–8086) — dùng để thử các endpoint `/admin/**` |
+| http://localhost:808x/swagger-ui.html | Swagger UI của từng service (8081–8088) — dùng để thử các endpoint `/admin/**` |
+| http://localhost:8333/product-images/... | Ảnh sản phẩm (S3 API của SeaweedFS, đọc ẩn danh; ghi cần `S3_ACCESS_KEY`/`S3_SECRET_KEY` trong `.env`) |
 | http://localhost:15672 | RabbitMQ Management UI |
+
+### Nâng cấp từ bản trước (chưa có SPU/SKU, review-service, object storage)
+
+Migration Flyway tự chuyển dữ liệu (mỗi sản phẩm cũ → 1 SPU + 1 SKU giữ nguyên id, xem
+[design-decisions §13](docs/design-decisions.md#13-catalog-spusku-và-catalog_document--cdc-trên-một-bảng-đã-công-bố-thay-vì-bảng-thô)).
+Chỉ cần làm tay hai việc vì script init PostgreSQL không chạy lại trên volume đã có:
+
+```bash
+# 1. Thêm REVIEW_DB_PASSWORD, S3_ACCESS_KEY, S3_SECRET_KEY vào .env (xem .env.example)
+# 2. Tạo database cho review-service
+docker compose up -d postgres
+docker compose exec postgres psql -U postgres -c "CREATE ROLE review_user WITH LOGIN PASSWORD 'local-only-review-db-pw'" \
+  -c "CREATE DATABASE review_db OWNER review_user" -c "REVOKE ALL ON DATABASE review_db FROM PUBLIC" \
+  -c "GRANT CONNECT, TEMPORARY ON DATABASE review_db TO review_user"
+docker compose up -d --build --remove-orphans   # --remove-orphans: gỡ container webshop-ui cũ
+```
+
+(Hoặc `docker compose down -v` để làm lại từ đầu.)
 
 Bản dòng lệnh của các kịch bản (không cần trình duyệt): `bash scripts/demo.sh`, `bash scripts/demo-failures.sh`.
 
@@ -94,14 +118,15 @@ docker compose logs connect-init                  # connector đã đăng ký, t
 curl -s 'localhost:8080/api/search/products?q=ban%20phim'
 ```
 
-Trên UI, ô tìm kiếm ở trang Cửa hàng gọi search-service. Thử sửa giá (Swagger, ADMIN) rồi tìm lại: kết quả
-đổi sau khoảng 1–2 giây — đó là độ trễ của CDC.
+Trên cửa hàng, ô tìm kiếm/sắp xếp/lọc giá gọi search-service (một kết quả = một SPU; tìm được theo giá trị biến thể
+như "áo đen" và theo mã SKU). Thử sửa giá một SKU trong backoffice rồi tìm lại: kết quả đổi sau khoảng 1–2 giây — đó là
+độ trễ của CDC trên bảng `catalog_document`.
 
 | URL | Dùng để |
 |---|---|
 | http://localhost:8090/connectors?expand=status | REST API Kafka Connect: trạng thái connector |
 | http://localhost:9200/products/_search?pretty | Xem trực tiếp document trong Elasticsearch |
-| `localhost:29092` | Kafka từ máy host (ví dụ `kafka-console-consumer.sh --topic cdc.product.public.products`) |
+| `localhost:29092` | Kafka từ máy host (ví dụ `kafka-console-consumer.sh --topic cdc.catalog.public.catalog_document`) |
 
 **Volume PostgreSQL đã có từ trước** (script init không chạy lại): tạo user CDC một lần **trước** khi chạy profile
 `search`, khi đó migration mới của product-service tự GRANT quyền đọc bảng:
@@ -115,14 +140,16 @@ docker compose exec postgres psql -U postgres -c "CREATE ROLE cdc_user WITH LOGI
 Nếu product-service đã chạy migration CDC trước khi có user (GRANT bị bỏ qua), cấp quyền tay:
 
 ```bash
-docker compose exec postgres psql -U postgres -d product_db -c "GRANT USAGE ON SCHEMA public TO cdc_user; GRANT SELECT ON products TO cdc_user"
+docker compose exec postgres psql -U postgres -d product_db -c "GRANT USAGE ON SCHEMA public TO cdc_user; GRANT SELECT ON catalog_document TO cdc_user"
 ```
 
-**Nâng cấp từ bản có index tồn kho** (connector `webshop-inventory`): `connect-init` tự gỡ connector, nhưng
-replication slot vẫn còn và **giữ WAL của cả PostgreSQL server** (tới trần `max_slot_wal_keep_size`) — phải drop tay:
+**Nâng cấp từ bản cũ** (connector `webshop-inventory` — index tồn kho, hoặc `webshop-product` — CDC bảng `products`
+trước khi có SPU/SKU): `connect-init` tự gỡ connector, nhưng replication slot vẫn còn và **giữ WAL của cả PostgreSQL
+server** (tới trần `max_slot_wal_keep_size`) — phải drop tay:
 
 ```bash
 docker compose exec postgres psql -U postgres -c "SELECT pg_drop_replication_slot('dbz_inventory')"
+docker compose exec postgres psql -U postgres -c "SELECT pg_drop_replication_slot('dbz_product')"
 docker compose exec postgres psql -U postgres -c "SELECT slot_name, active, wal_status FROM pg_replication_slots"
 ```
 
@@ -168,23 +195,30 @@ Test đáng đọc nhất:
 | `CheckoutSagaTest` | Máy trạng thái Saga thuần (không DB): bồi hoàn, timeout, reply trễ/trùng |
 | `CheckoutSagaIT` | Saga end-to-end qua RabbitMQ thật; checkout trùng; phục hồi sau restart; capture thành công nhưng reply mất |
 | `GatewayIT` | JWT ở biên, CORS, giới hạn kích thước, không lộ `/admin` |
-| `SearchCdcIT` | Tìm không dấu và theo tiền tố; index mới dựng sau alias, chỉ chuyển alias khi đã bắt kịp; bản cũ replay không ghi đè bản mới; xóa không "hồi sinh"; message hỏng vào DLT mà không chặn partition |
+| `ProductIT` | SPU/SKU: thuộc tính SKU phải khớp options, trùng mã → 409, bản nháp không lộ ra cửa hàng; ảnh kiểm tra bằng nội dung file; `catalog_document` có version tăng dần; rating event cũ bị bỏ qua |
+| `ReviewIT` | Chỉ người có đơn CONFIRMED được đánh giá; một người một đánh giá; ẩn bài → tính lại điểm + phát event |
+| `SearchCdcIT` | Tìm không dấu, theo tiền tố, theo giá trị biến thể và mã SKU; lọc giá theo khoảng [min, max] của SPU; index mới dựng sau alias, chỉ chuyển alias khi đã bắt kịp; bản cũ replay không ghi đè bản mới; xóa không "hồi sinh"; message hỏng vào DLT mà không chặn partition |
 
 ## Endpoint chính (qua gateway :8080)
 
 | Method | Path | Auth |
 |---|---|---|
 | POST | `/api/auth/register`, `/api/auth/login` | public |
-| GET | `/api/products`, `/api/products/{id}`, `/api/inventory/{productId}`, `/api/inventory/batch` | public |
+| GET | `/api/products`, `/api/products/{idOrSlug}` (SPU), `/api/products/skus/{skuId}`, `/api/products/skus/batch` | public |
+| GET | `/api/inventory/{skuId}`, `/api/inventory/batch` | public |
 | GET | `/api/search/products?q=&minPriceVnd=&maxPriceVnd=&sort=` (profile `search`) | public |
-| GET/POST/PUT/DELETE | `/api/cart`, `/api/cart/items[/{productId}]` | USER |
+| GET | `/api/reviews/products/{productId}[/summary]` | public |
+| GET/PUT | `/api/reviews/products/{productId}/mine` (viết/sửa đánh giá, cần đã mua) | USER |
+| GET/POST/PUT/DELETE | `/api/cart`, `/api/cart/items[/{skuId}]` | USER |
 | POST | `/api/orders/checkout` (header `Idempotency-Key`) | USER |
 | GET | `/api/orders`, `/api/orders/{id}` | USER |
 | GET | `/api/wallet/me`, `/api/wallet/me/ledger` | USER |
-| PUT | `/api/inventory/{productId}`; POST/PUT `/api/products` | ADMIN |
+| PUT | `/api/inventory/{skuId}` | ADMIN |
+| GET/POST/PUT | `/api/products/manage[/{id}[/skus[/{skuId}]]]`; POST/PUT/DELETE `/api/products/manage/{id}/images...` | ADMIN |
+| GET/PUT | `/api/reviews/moderation[/{reviewId}/status]` | ADMIN |
 
 Admin/vận hành (gọi thẳng port service, cần token ADMIN — `ADMIN_EMAIL`/`ADMIN_PASSWORD` trong `.env`):
-`/admin/dlq` (8083–8086), `/admin/sagas/{id}` (8086), `/admin/reservations/{id}` (8084), `/admin/credit-reservations/{id}` (8085).
+`/admin/dlq` (8082–8086, 8088), `/admin/sagas/{id}` (8086), `/admin/reservations/{id}` (8084), `/admin/credit-reservations/{id}` (8085).
 Chi tiết, ví dụ request/response: [docs/api.md](docs/api.md).
 
 ## Luồng demo (curl thuần)
@@ -198,7 +232,7 @@ TOKEN=$(curl -s $GW/api/auth/login -H 'content-type: application/json' \
 curl -s $GW/api/wallet/me -H "Authorization: Bearer $TOKEN"                 # 10.000.000 VND
 curl -s $GW/api/products
 curl -s $GW/api/cart/items -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
-  -d '{"productId":"11111111-1111-1111-1111-111111111111","quantity":2}'
+  -d '{"skuId":"11111111-1111-1111-1111-111111111111","quantity":2}'           # SKU: bàn phím switch Red
 ORDER=$(curl -s -X POST $GW/api/orders/checkout -H "Authorization: Bearer $TOKEN" \
   -H "Idempotency-Key: checkout-$(date +%s)" | jq -r .orderId)
 curl -s $GW/api/orders/$ORDER -H "Authorization: Bearer $TOKEN"              # PENDING → CONFIRMED
@@ -232,7 +266,10 @@ curl -s -X PUT $GW/api/inventory/22222222-2222-2222-2222-222222222222 -H "Author
 | `GET /api/wallet/me` → 404 ngay sau đăng ký | Bình thường (eventual consistency); thử lại sau ~1 giây. Nếu kéo dài: kiểm tra `payment.user-registered.q.dlq`. |
 | Đơn đứng ở `PENDING` lâu | Xem `GET localhost:8086/admin/sagas/{id}` (state, attempts, deadline); kiểm tra service đích và DLQ. |
 | `webshop_outbox_backlog` tăng mãi | Broker down, hoặc message không route được (`last_error` trong `outbox_event` có `NO_ROUTE`) — thiếu queue/binding. |
-| Gateway 413 | Body > 1MB (`GATEWAY_MAX_REQUEST_SIZE`). |
+| Gateway 413 | Body > 1MB (`GATEWAY_MAX_REQUEST_SIZE`); upload ảnh > 6MB (`GATEWAY_MAX_UPLOAD_SIZE`, service giới hạn 5MB/ảnh). |
+| Upload ảnh 503 `DEPENDENCY_UNAVAILABLE` (object-storage) | Object storage chưa chạy/chưa healthy (`docker compose ps object-storage`); product-service tự tạo bucket ở lần upload kế tiếp. |
+| Ảnh không hiện ở cửa hàng | URL ảnh dùng `STORAGE_PUBLIC_BASE_URL` (mặc định `http://localhost:8333/product-images`) — trình duyệt phải tới được cổng 8333. |
+| Không viết được đánh giá dù vừa mua | review-service ghi nhận lượt mua từ `OrderConfirmed` (vài trăm ms); kiểm tra `review.order-events.q.dlq`. |
 | Trên Windows `bash scripts/demo.sh` lỗi `\r` | Đảm bảo file dùng LF (repo lưu LF; tắt `core.autocrlf` cho repo nếu clone lại). |
 
 ## Đã hoàn thành / Giới hạn đã biết
@@ -255,5 +292,11 @@ Giới hạn và khoảng trống (có chủ đích hoặc ngoài phạm vi):
 9. Một PostgreSQL server và một RabbitMQ node cho local — không HA. Không Kubernetes/service mesh (theo yêu cầu).
 10. `/actuator/prometheus` mở public trên port service (chỉ phù hợp mạng nội bộ); gateway không route `/actuator` của service.
 11. Kịch bản Postman dùng `setNextRequest` để poll, không có độ trễ thật giữa các lần poll.
-12. `webshop-ui` lưu access token trong `localStorage` (chỉ hợp với demo; production dùng cookie HttpOnly do BFF quản lý).
+12. `storefront-ui`/`backoffice-ui` lưu access token trong `localStorage` (chỉ hợp với demo; production dùng cookie HttpOnly do BFF quản lý).
     UI chưa có test tự động (đã kiểm thử bằng trình duyệt headless, xem báo cáo kiểm chứng).
+13. **Ảnh**: chưa resize/thumbnail, chưa có job dọn file mồ côi trên object storage (lỗi giữa upload và ghi DB chỉ để lại file
+    thừa, không bao giờ để DB trỏ tới file mất — design-decisions §14). Key S3 local có quyền Admin.
+14. **SKU không xóa được**, chỉ ngừng bán (đã nằm trong tồn kho/đơn hàng của service khác). Dòng `order_item` tạo trước
+    khi có SKU không có `productId` (SPU) → không dùng để mở quyền đánh giá.
+15. **Đánh giá** chỉ mở sau khi review-service nhận `OrderConfirmed` (eventual consistency, thường < 1 giây); chưa có
+    ảnh trong đánh giá, chưa có "hữu ích"/trả lời của shop.

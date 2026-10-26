@@ -9,12 +9,17 @@ giải thích bằng tiếng Việt. Các file được nhắc tới có thể m
 |---|---|---|---|
 | `api-gateway` | 8080 | — | Điểm vào duy nhất cho client: routing, xác thực JWT ở biên, CORS, giới hạn kích thước request, correlation-id. Không chứa nghiệp vụ. |
 | `auth-service` | 8081 | `auth_db` | Đăng ký, đăng nhập, phát hành JWT. Publish `UserRegistered` qua Outbox. |
-| `product-service` | 8082 | `product_db` | Danh mục sản phẩm, giá VND (số nguyên), trạng thái active. |
-| `cart-service` | 8083 | `cart_db` | Giỏ hàng theo user. Không lưu giá. Gọi Product Service đồng bộ (circuit breaker). Dọn giỏ khi nhận `OrderConfirmed`. |
-| `inventory-service` | 8084 | `inventory_db` | `stock_on_hand`, `reserved_quantity`; reserve/commit/release idempotent theo `reservationId`. |
+| `product-service` | 8082 | `product_db` | Catalog SPU/SKU: thông tin, mô tả Markdown, thông số, options, giá theo SKU (VND số nguyên), ảnh (object storage S3). Ghi `catalog_document` cho search; nhận `ProductRatingChanged`. |
+| `cart-service` | 8083 | `cart_db` | Giỏ hàng theo user, dòng theo `skuId`. Không lưu giá. Gọi Product Service đồng bộ (circuit breaker). Dọn giỏ khi nhận `OrderConfirmed`. |
+| `inventory-service` | 8084 | `inventory_db` | Tồn kho theo SKU: `stock_on_hand`, `reserved_quantity`; reserve/commit/release idempotent theo `reservationId`. |
 | `payment-service` | 8085 | `payment_db` | Ví credit nội bộ + sổ cái append-only; tạo ví khi nhận `UserRegistered`; reserve/capture/release credit. |
-| `order-service` | 8086 | `order_db` | Tạo đơn từ giỏ, snapshot giá, **điều phối Saga checkout** (orchestration). |
-| PostgreSQL 16 | 5432 | 6 database | Một server cho tiện local, nhưng mỗi service một database + user riêng, user không có quyền CONNECT chéo. |
+| `order-service` | 8086 | `order_db` | Tạo đơn từ giỏ, snapshot giá + biến thể, **điều phối Saga checkout** (orchestration). |
+| `search-service` | 8087 | Elasticsearch | Read model tìm kiếm (một document mỗi SPU) dựng từ CDC (profile `search`). |
+| `review-service` | 8088 | `review_db` | Đánh giá theo SPU, chỉ người đã mua (từ `OrderConfirmed`); tóm tắt điểm → `ProductRatingChanged` (Outbox). |
+| `storefront-ui` | 3000 | — | Cửa hàng Next.js; BFF chỉ chuyển tiếp `/api/**` tới gateway. |
+| `backoffice-ui` | 3001 | — | Backoffice Next.js (ADMIN): catalog, ảnh, tồn kho, kiểm duyệt; trang vận hành gọi `/admin/**` của service. |
+| SeaweedFS (`object-storage`) | 8333 | bucket `product-images` | Object storage (S3 API) cho ảnh; đọc ẩn danh, chỉ product-service ghi. |
+| PostgreSQL 16 | 5432 | 7 database | Một server cho tiện local, nhưng mỗi service một database + user riêng, user không có quyền CONNECT chéo. |
 | RabbitMQ 4.1 | 5672 / 15672 | — | Topic exchange `webshop.events`, dead-letter exchange `webshop.dlx`, queue durable, retry tiers, DLQ. |
 
 Thư viện dùng chung (không phải service):
@@ -363,18 +368,19 @@ ra ngoài trong handler); Saga retry là tầng nghiệp vụ dài hạn, mỗi 
 
 ```mermaid
 flowchart LR
-    P[(product_db<br/>products)] -- WAL / pgoutput --> DP[Debezium connector<br/>webshop-product<br/>slot dbz_product]
-    DP --> T1[[cdc.product.public.products<br/>compacted]]
-    T1 --> S[search-service<br/>group search-indexer-products-v2]
-    S -- scripted upsert, so version<br/>ghi vào index THẬT --> ES[(products-v2)]
+    P[(product_db<br/>catalog_document)] -- WAL / pgoutput --> DP[Debezium connector<br/>webshop-catalog<br/>slot dbz_catalog]
+    DP --> T1[[cdc.catalog.public.catalog_document<br/>compacted]]
+    T1 --> S[search-service<br/>group search-indexer-products-v3]
+    S -- scripted upsert, so version<br/>ghi vào index THẬT --> ES[(products-v3)]
     A{{alias products}} -- đọc --> ES
     S -. message hỏng .-> DLT[[topic.DLT]]
     GW[API Gateway] -- GET /api/search/products --> S
-    UI[webshop-ui] -- 1. tìm --> GW
-    UI -- 2. tồn kho thật của các id đang hiển thị<br/>GET /api/inventory/batch --> GW
+    UI[storefront-ui] -- 1. tìm --> GW
+    UI -- 2. trang chi tiết: tồn kho thật theo skuId<br/>GET /api/inventory/batch --> GW
 ```
 
-- **Một document = một sản phẩm**, chỉ từ bảng `products`. **Tồn kho không nằm trong index** (lý do:
+- **Một document = một SPU**, từ bảng `catalog_document` (payload JSON do product-service ghi cùng transaction với
+  thay đổi catalog — [design-decisions.md mục 13](design-decisions.md)). **Tồn kho không nằm trong index** (lý do:
   [design-decisions.md mục 12](design-decisions.md#12-search-cdc-debezium--kafka--elasticsearch-thay-vì-gọi-đồng-bộ-hoặc-dùng-outbox-sẵn-có)):
   UI tìm trước, rồi đọc tồn kho thật cho đúng các sản phẩm đang hiển thị bằng một request batch.
 - **Thứ tự**: key Kafka = khóa chính → mọi thay đổi của một sản phẩm cùng partition, đúng thứ tự commit.
@@ -384,3 +390,31 @@ flowchart LR
   `elasticsearch/products-v3.json` → khi khởi động: tạo v3 rỗng, consumer group mới `search-indexer-products-v3` đọc
   topic từ đầu vào v3 trong khi alias vẫn trỏ v2; listener idle (đã đọc hết) → chuyển alias nguyên tử. Xóa index cũ
   và group cũ sau khi kiểm tra.
+
+## 11. Catalog SPU/SKU, ảnh và đánh giá
+
+```mermaid
+flowchart LR
+    BO[backoffice-ui] -- "POST/PUT /api/products/manage/**<br/>(ADMIN)" --> GW[API Gateway]
+    BO -- "upload ảnh (multipart ≤ 6MB)" --> GW
+    GW --> PS[product-service]
+    PS -- "1. PutObject (ngoài transaction)" --> M[(S3 / SeaweedFS<br/>product-images)]
+    PS -- "2. TX: product/product_sku/product_image<br/>+ catalog_document" --> PDB[(product_db)]
+    SF[storefront-ui] -- "GET ảnh (public-read)" --> M
+    SF -- "GET /api/products/{slug}, /api/inventory/batch" --> GW
+    OS[order-service] -- "OrderConfirmed v2 (skuId, productId, variantName)" --> MQ{{RabbitMQ}}
+    MQ --> RS[review-service]
+    RS -- "purchase: ai đã mua SPU nào" --> RDB[(review_db)]
+    SF -- "PUT /api/reviews/products/{id}/mine" --> GW --> RS
+    RS -- "ProductRatingChanged (Outbox)" --> MQ --> PS
+```
+
+- **SPU → SKU**: storefront hiển thị một trang mỗi SPU, người mua chọn giá trị từng option; tổ hợp xác định SKU, và
+  SKU là thứ vào giỏ, được giữ hàng, ghi vào đơn. Tồn kho từng SKU đọc thẳng từ Inventory Service.
+- **Ảnh**: upload file trước rồi ghi DB; xóa dòng DB trước rồi xóa file → lỗi giữa chừng chỉ để lại file mồ côi
+  ([design-decisions.md mục 14](design-decisions.md)).
+- **Đánh giá**: quyền viết dựng từ event `OrderConfirmed` (không gọi Order Service); điểm trung bình tính lại dưới khóa
+  dòng `product_rating` và đẩy sang Product Service qua Outbox
+  ([design-decisions.md mục 15](design-decisions.md)).
+- **Hai UI**: storefront chỉ có đường tới gateway; backoffice có thêm đường tới `/admin/**` của từng service
+  ([design-decisions.md mục 16](design-decisions.md)).

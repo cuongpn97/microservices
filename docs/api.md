@@ -74,43 +74,70 @@ Claims: `sub` (userId), `iss` (`webshop-auth`), `iat`, `exp`, `roles`. Sai email
 
 ---
 
-## Product (`product-service`)
+## Product (`product-service`) — catalog SPU/SKU
+
+**SPU** (sản phẩm: tên, slug, mô tả Markdown, thông số, ảnh, options) chứa nhiều **SKU** (biến thể bán được: một tổ hợp
+giá trị option, có mã, giá, giá gạch ngang, ảnh riêng). Giỏ hàng, tồn kho, đơn hàng đều dùng `skuId`.
 
 | Method | Path | Quyền | Mô tả |
 |---|---|---|---|
-| GET | `/api/products?page=0&size=20` | public | Sản phẩm đang bán |
-| GET | `/api/products/{id}` | public | Kể cả sản phẩm inactive (có cờ `active`) |
-| GET | `/api/products/batch?ids=a,b,c` | public | Tối đa 100 id |
-| POST | `/api/products` | ADMIN | Tạo |
-| PUT | `/api/products/{id}` | ADMIN | Sửa (đổi giá chỉ ảnh hưởng đơn tương lai) |
+| GET | `/api/products?page=0&size=20` | public | SPU đang bán (`minPriceVnd`/`maxPriceVnd` qua các SKU, ảnh đại diện, rating) |
+| GET | `/api/products/{idOrSlug}` | public | Chi tiết SPU đang bán, chỉ kèm SKU bán được; bản nháp → `404 PRODUCT_NOT_FOUND` |
+| GET | `/api/products/skus/{skuId}` | public | Tra cứu SKU (contract của Cart/Order); trả cả SKU ngừng bán với `active:false` |
+| GET | `/api/products/skus/batch?ids=..&ids=..` | public | Tối đa 100 skuId; id không tồn tại bị bỏ qua |
+| GET | `/api/products/manage?q=&active=&page=&size=` | ADMIN | Danh sách quản trị (kể cả bản nháp) |
+| GET | `/api/products/manage/{id}` | ADMIN | Chi tiết đầy đủ (mọi SKU) |
+| POST | `/api/products/manage` | ADMIN | Tạo SPU (mặc định `active:false`); slug bỏ trống → sinh từ tên (bỏ dấu) |
+| PUT | `/api/products/manage/{id}` | ADMIN | Ghi đè nội dung; `slug`/`active` bỏ trống = giữ nguyên; đổi options làm SKU sai → `422` |
+| POST | `/api/products/manage/{id}/skus` | ADMIN | Thêm SKU (thuộc tính phải khớp options) |
+| PUT | `/api/products/manage/{id}/skus/{skuId}` | ADMIN | Sửa SKU (không có DELETE: ngừng bán bằng `active:false`) |
+| POST | `/api/products/manage/{id}/images` | ADMIN | `multipart/form-data`: `file` (JPEG/PNG/WebP ≤ 5MB, kiểm tra nội dung), `altText` |
+| PUT | `/api/products/manage/{id}/images/order` | ADMIN | `{"imageIds":[...]}` — hoán vị đủ mọi ảnh; ảnh đầu là ảnh đại diện |
+| PUT/DELETE | `/api/products/manage/{id}/images/{imageId}` | ADMIN | Sửa `altText` / xóa ảnh (SKU dùng ảnh đó quay về ảnh SPU) |
+
+Mọi API ghi trả về chi tiết SPU mới nhất. Lỗi: `422 INVALID_CATALOG_CHANGE` (thuộc tính SKU sai, trùng tổ hợp, quá 10
+ảnh, giá gạch ≤ giá bán...), `409 SKU_CODE_TAKEN` / `SLUG_TAKEN` / `DUPLICATE_VARIANT`, `422 UNSUPPORTED_IMAGE`,
+`413 PAYLOAD_TOO_LARGE`, `503 DEPENDENCY_UNAVAILABLE` (object storage).
 
 ```bash
-curl -s localhost:8080/api/products/11111111-1111-1111-1111-111111111111
+curl -s localhost:8080/api/products/ao-thun-cotton-basic
 ```
 
 ```json
-{"id":"11111111-1111-1111-1111-111111111111","name":"Mechanical Keyboard","description":"Bàn phím cơ 87 phím","priceVnd":1500000,"active":true,"updatedAt":"..."}
+{"id":"a0000000-0000-4000-8000-000000000006","slug":"ao-thun-cotton-basic","name":"Áo thun Cotton Basic",
+ "brand":"Webshop Wear","shortDescription":"Áo thun 100% cotton, form regular","description":"Áo thun **100% cotton** ...",
+ "specifications":[{"name":"Chất liệu","value":"100% cotton 220gsm"}],
+ "options":[{"name":"Màu","values":["Đen","Trắng"]},{"name":"Size","values":["M","L","XL"]}],
+ "skus":[{"id":"66666666-6666-6666-6666-000000000001","skuCode":"TEE-BLK-M","attributes":{"Màu":"Đen","Size":"M"},
+          "variantName":"Đen / M","priceVnd":199000,"compareAtPriceVnd":null,"imageId":null,"imageUrl":null,
+          "active":true,"sellable":true}],
+ "images":[],"ratingAvg":4.5,"ratingCount":2,"active":true,"createdAt":"...","updatedAt":"...","version":3}
 ```
 
-Dữ liệu seed:
+Dữ liệu seed (SKU id cố định, tồn kho seed bởi Inventory Service):
 
-| productId | Tên | Giá (VND) | Tồn kho demo |
-|---|---|---|---|
-| `11111111-1111-1111-1111-111111111111` | Mechanical Keyboard | 1.500.000 | 50 |
-| `22222222-2222-2222-2222-222222222222` | Wireless Mouse | 450.000 | 100 |
-| `33333333-3333-3333-3333-333333333333` | 27-inch Monitor | 6.900.000 | 2 |
-| `44444444-4444-4444-4444-444444444444` | Premium Laptop | 25.000.000 | 10 |
-| `55555555-5555-5555-5555-555555555555` | Discontinued Item (inactive) | 100.000 | — |
+| SPU (slug) | SKU id | Mã | Biến thể | Giá (VND) | Tồn kho demo |
+|---|---|---|---|---|---|
+| `mechanical-keyboard` | `11111111-1111-1111-1111-111111111111` | KB87-RED | Red | 1.500.000 | 50 |
+| | `11111111-1111-1111-1111-000000000002` | KB87-BLU | Blue | 1.550.000 | 30 |
+| | `11111111-1111-1111-1111-000000000003` | KB87-BRN | Brown | 1.550.000 | 0 |
+| `wireless-mouse` | `22222222-2222-2222-2222-222222222222` | MS24-BLK | Đen | 450.000 | 100 |
+| | `22222222-2222-2222-2222-000000000002` | MS24-WHT | Trắng | 450.000 | 40 |
+| `27-inch-monitor` | `33333333-3333-3333-3333-333333333333` | MON27-2K | — | 6.900.000 | 2 |
+| `premium-laptop` | `44444444-4444-4444-4444-444444444444` | LAP-PRO | — | 25.000.000 | 10 |
+| `discontinued-item` (inactive) | `55555555-5555-5555-5555-555555555555` | OLD-ITEM | — | 100.000 | — |
+| `ao-thun-cotton-basic` | `66666666-6666-6666-6666-00000000000{1..6}` | TEE-{BLK,WHT}-{M,L,XL} | Màu × Size | 199.000–219.000 | 0–25 |
+| `tai-nghe-bluetooth-anc` | `77777777-7777-7777-7777-00000000000{1,2}` | ANC-BLK, ANC-SLV | Đen, Bạc | 1.290.000 (gạch 1.590.000) | 15, 8 |
 
 ---
 
-## Inventory (`inventory-service`)
+## Inventory (`inventory-service`) — theo SKU
 
 | Method | Path | Quyền | Mô tả |
 |---|---|---|---|
-| GET | `/api/inventory/{productId}` | public | `stockOnHand`, `reservedQuantity`, `available` |
-| GET | `/api/inventory/batch?ids=..&ids=..` | public | Tồn kho nhiều sản phẩm một lần (1–100 id); id chưa có tồn kho bị bỏ qua |
-| PUT | `/api/inventory/{productId}` | ADMIN | Đặt `stockOnHand` (≥ `reservedQuantity`), tạo nếu chưa có |
+| GET | `/api/inventory/{skuId}` | public | `stockOnHand`, `reservedQuantity`, `available` |
+| GET | `/api/inventory/batch?ids=..&ids=..` | public | Tồn kho nhiều SKU một lần (1–100 id); id chưa có tồn kho bị bỏ qua |
+| PUT | `/api/inventory/{skuId}` | ADMIN | Đặt `stockOnHand` (≥ `reservedQuantity`), tạo nếu chưa có |
 | GET | `localhost:8084/admin/reservations/{orderId}` | ADMIN | Trạng thái reservation |
 
 ```bash
@@ -121,10 +148,11 @@ curl -s -X PUT localhost:8080/api/inventory/22222222-2222-2222-2222-222222222222
 ```
 
 ```json
-{"productId":"22222222-2222-2222-2222-222222222222","stockOnHand":200,"reservedQuantity":0,"available":200,"updatedAt":"..."}
+{"skuId":"22222222-2222-2222-2222-222222222222","stockOnHand":200,"reservedQuantity":0,"available":200,"updatedAt":"..."}
 ```
 
-Reserve/commit/release KHÔNG có HTTP public: chúng là command của Saga qua RabbitMQ.
+Reserve/commit/release KHÔNG có HTTP public: chúng là command của Saga qua RabbitMQ (`ReserveInventory` v2: dòng hàng
+theo `skuId`; v1 theo `productId` vẫn được nhận và upcast).
 
 ---
 
@@ -132,27 +160,43 @@ Reserve/commit/release KHÔNG có HTTP public: chúng là command của Saga qua
 
 | Method | Path | Body | Mô tả |
 |---|---|---|---|
-| GET | `/api/cart?pricing=true` | — | Giỏ + giá hiện tại (tham khảo). `pricing=false`: chỉ productId/quantity |
-| POST | `/api/cart/items` | `{"productId","quantity"}` | Cộng thêm số lượng (1–99), sản phẩm phải active |
-| PUT | `/api/cart/items/{productId}` | `{"quantity"}` | Đặt số lượng |
-| DELETE | `/api/cart/items/{productId}` | — | Xóa một sản phẩm |
+| GET | `/api/cart?pricing=true` | — | Giỏ + giá hiện tại (tham khảo). `pricing=false`: chỉ skuId/quantity |
+| POST | `/api/cart/items` | `{"skuId","quantity"}` | Cộng thêm số lượng (1–99), SKU phải bán được |
+| PUT | `/api/cart/items/{skuId}` | `{"quantity"}` | Đặt số lượng |
+| DELETE | `/api/cart/items/{skuId}` | — | Xóa một dòng |
 | DELETE | `/api/cart` | — | Xóa giỏ |
 
 ```bash
 curl -s localhost:8080/api/cart/items -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
-  -d '{"productId":"11111111-1111-1111-1111-111111111111","quantity":2}'
+  -d '{"skuId":"66666666-6666-6666-6666-000000000001","quantity":2}'
 curl -s localhost:8080/api/cart -H "Authorization: Bearer $TOKEN"
 ```
 
 ```json
-{"userId":"945abf21-...","revision":2,"items":[
-  {"productId":"11111111-...","quantity":2,"name":"Mechanical Keyboard","unitPriceVnd":1500000,"lineTotalVnd":3000000,"active":true},
-  {"productId":"22222222-...","quantity":1,"name":"Wireless Mouse","unitPriceVnd":450000,"lineTotalVnd":450000,"active":true}],
- "estimatedTotalVnd":3450000,"pricingAvailable":true,"updatedAt":"..."}
+{"userId":"945abf21-...","revision":1,"items":[
+  {"skuId":"66666666-...","quantity":2,"productId":"a0000000-...","productSlug":"ao-thun-cotton-basic",
+   "productName":"Áo thun Cotton Basic","skuCode":"TEE-BLK-M","variantName":"Đen / M","imageUrl":null,
+   "unitPriceVnd":199000,"lineTotalVnd":398000,"active":true}],
+ "estimatedTotalVnd":398000,"pricingAvailable":true,"updatedAt":"..."}
 ```
 
 Khi Product Service lỗi / circuit OPEN: `GET` vẫn `200` với `pricingAvailable:false` (không có giá); `POST/PUT` trả `503 DEPENDENCY_UNAVAILABLE`.
-Lỗi khác: `400` (quantity ≤ 0 hoặc > 99), `422 PRODUCT_NOT_FOUND`, `422 PRODUCT_UNAVAILABLE`.
+Lỗi khác: `400` (quantity ≤ 0 hoặc > 99), `422 SKU_NOT_FOUND`, `422 PRODUCT_UNAVAILABLE`.
+
+---
+
+## Review (`review-service`)
+
+| Method | Path | Quyền | Mô tả |
+|---|---|---|---|
+| GET | `/api/reviews/products/{productId}?rating=&page=&size=` | public | Đánh giá PUBLISHED, mới nhất trước |
+| GET | `/api/reviews/products/{productId}/summary` | public | `ratingCount`, `ratingAvg`, `histogram` (5→1 sao) |
+| GET | `/api/reviews/products/{productId}/mine` | USER | `{"canReview": đã có đơn CONFIRMED chứa SPU, "review": bài của mình hoặc null}` |
+| PUT | `/api/reviews/products/{productId}/mine` | USER | `{"rating":1..5,"title?","content"(10–4000)}` — tạo/sửa (idempotent); chưa mua → `403 NOT_PURCHASED` |
+| GET | `/api/reviews/moderation?status=&productId=` | ADMIN | Mọi đánh giá, kể cả đã ẩn |
+| PUT | `/api/reviews/moderation/{reviewId}/status` | ADMIN | `{"status":"HIDDEN"|"PUBLISHED"}` → tính lại điểm, phát `ProductRatingChanged` |
+
+`productId` ở đây là id **SPU**. Lượt mua được ghi nhận từ event `OrderConfirmed` v2 (trễ vài trăm ms sau khi đơn CONFIRMED).
 
 ---
 
@@ -194,8 +238,10 @@ curl -s -i -X POST localhost:8080/api/orders/checkout \
 
 ```json
 {"orderId":"5ed07d10-9767-469a-bc20-3252806d44ea","status":"PENDING","sagaState":"PENDING","totalVnd":3450000,
- "items":[{"productId":"11111111-...","productName":"Mechanical Keyboard","unitPriceVnd":1500000,"quantity":2,"lineTotalVnd":3000000},
-          {"productId":"22222222-...","productName":"Wireless Mouse","unitPriceVnd":450000,"quantity":1,"lineTotalVnd":450000}],
+ "items":[{"skuId":"11111111-...","productId":"...","productName":"Mechanical Keyboard","skuCode":"KB87-RED",
+           "variantName":"Red","unitPriceVnd":1500000,"quantity":2,"lineTotalVnd":3000000},
+          {"skuId":"22222222-...","productId":"...","productName":"Wireless Mouse","skuCode":"MS24-BLK",
+           "variantName":"Đen","unitPriceVnd":450000,"quantity":1,"lineTotalVnd":450000}],
  "failureReason":null,"createdAt":"...","updatedAt":"..."}
 ```
 
@@ -218,7 +264,7 @@ curl -s -i -X POST localhost:8080/api/orders/checkout \
 | CONFIRMED | COMPLETED | Thành công |
 | FAILED | FAILED | Thất bại, `failureReason` cho biết lý do; không bị trừ tiền |
 
-`failureReason` có thể là: `INVENTORY_REJECTED:INSUFFICIENT_STOCK:<productId>`, `INVENTORY_REJECTED:UNKNOWN_PRODUCT:<id>`,
+`failureReason` có thể là: `INVENTORY_REJECTED:INSUFFICIENT_STOCK:<skuId>`, `INVENTORY_REJECTED:UNKNOWN_SKU:<skuId>`,
 `CREDIT_REJECTED:INSUFFICIENT_FUNDS`, `CREDIT_REJECTED:WALLET_NOT_FOUND`, `INVENTORY_TIMEOUT`, `PAYMENT_TIMEOUT`.
 
 Đơn của người khác trả `404`.
@@ -241,9 +287,9 @@ curl -s -i -X POST localhost:8080/api/orders/checkout \
 
 | Tham số | Mặc định | Mô tả |
 |---|---|---|
-| `q` | — | Từ khóa (≤ 200 ký tự), không phân biệt dấu (`ban phim` khớp "Bàn phím"), chấp nhận gõ sai nhẹ và tiền tố |
-| `minPriceVnd`, `maxPriceVnd` | — | Khoảng giá (VND, số nguyên) |
-| `sort` | `RELEVANCE` | `RELEVANCE` · `PRICE_ASC` · `PRICE_DESC` · `NAME` |
+| `q` | — | Từ khóa (≤ 200 ký tự), không phân biệt dấu (`ban phim` khớp "Bàn phím"), gõ sai nhẹ, tiền tố, giá trị biến thể (`ao den`), mã SKU (`kb87-red`) |
+| `minPriceVnd`, `maxPriceVnd` | — | Khoảng giá (VND); SPU khớp khi khoảng [giá thấp nhất, cao nhất] của nó giao với khoảng lọc |
+| `sort` | `RELEVANCE` | `RELEVANCE` · `PRICE_ASC` (theo giá thấp nhất) · `PRICE_DESC` (theo giá cao nhất) · `RATING` · `NAME` |
 | `page`, `size` | `0`, `20` | `size` ≤ 50; `(page + 1) * size` ≤ 10 000 (lỗi `PAGE_TOO_DEEP`) |
 
 ```bash
@@ -251,13 +297,14 @@ curl -s 'localhost:8080/api/search/products?q=ban%20phim&sort=PRICE_ASC'
 ```
 
 ```json
-{"items":[{"productId":"11111111-1111-1111-1111-111111111111","name":"Mechanical Keyboard","description":"Bàn phím cơ 87 phím",
-  "priceVnd":1500000,"score":3.2}],"page":0,"size":20,"totalElements":1,"tookMs":4}
+{"items":[{"productId":"...","slug":"mechanical-keyboard","name":"Mechanical Keyboard","brand":"Webshop Gear",
+  "shortDescription":"Bàn phím cơ 87 phím, hot-swap, đèn nền trắng","minPriceVnd":1500000,"maxPriceVnd":1550000,
+  "imageUrl":null,"ratingAvg":null,"ratingCount":0,"score":3.2}],"page":0,"size":20,"totalElements":1,"tookMs":4}
 ```
 
 Dữ liệu là read model dựng từ CDC: trễ vài giây so với Product Service. **Không trả tồn kho** (thay đổi quá thường
-xuyên để index — xem design-decisions mục 12): lấy số thật bằng `GET /api/inventory/batch?ids=..` cho các sản phẩm
-đang hiển thị. Elasticsearch không kết nối được ⇒ `503 DEPENDENCY_UNAVAILABLE`.
+xuyên để index — xem design-decisions mục 12): lấy số thật theo skuId bằng `GET /api/inventory/batch?ids=..` ở trang
+chi tiết sản phẩm. Document dựng từ bảng `catalog_document` (design-decisions mục 13). Elasticsearch không kết nối được ⇒ `503 DEPENDENCY_UNAVAILABLE`.
 
 ---
 

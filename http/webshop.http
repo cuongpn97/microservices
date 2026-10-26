@@ -1,5 +1,6 @@
 ### Bộ request cho IntelliJ HTTP Client / VS Code REST Client (biến lưu giữa các request bằng client.global).
 @gateway = http://localhost:8080
+# skuId (biến thể bán được) — giỏ hàng, tồn kho, đơn hàng đều dùng SKU, không dùng id SPU.
 @keyboard = 11111111-1111-1111-1111-111111111111
 @mouse = 22222222-2222-2222-2222-222222222222
 @laptop = 44444444-4444-4444-4444-444444444444
@@ -24,10 +25,18 @@ Content-Type: application/json
 GET {{gateway}}/api/wallet/me
 Authorization: Bearer {{token}}
 
-### 4. Sản phẩm (public)
+### 4. Sản phẩm (public) — danh sách SPU, giá là khoảng min–max của các SKU
 GET {{gateway}}/api/products
 
-### 5. Tồn kho (public)
+### 4a. Chi tiết SPU theo slug: options (Màu, Size), SKU, ảnh, mô tả Markdown, thông số, rating
+GET {{gateway}}/api/products/ao-thun-cotton-basic
+
+> {% client.global.set("teeId", response.body.id); %}
+
+### 4b. Tra cứu SKU (contract dùng bởi Cart/Order)
+GET {{gateway}}/api/products/skus/{{keyboard}}
+
+### 5. Tồn kho (public) — theo skuId
 GET {{gateway}}/api/inventory/{{keyboard}}
 
 ### 6. Thêm vào giỏ
@@ -35,14 +44,14 @@ POST {{gateway}}/api/cart/items
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
-{"productId": "{{keyboard}}", "quantity": 2}
+{"skuId": "{{keyboard}}", "quantity": 2}
 
 ### 7. Thêm chuột
 POST {{gateway}}/api/cart/items
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
-{"productId": "{{mouse}}", "quantity": 1}
+{"skuId": "{{mouse}}", "quantity": 1}
 
 ### 8. Xem giỏ
 GET {{gateway}}/api/cart
@@ -89,4 +98,65 @@ Authorization: Bearer {{admin}}
 
 ### 16. DLQ của payment-service
 GET http://localhost:8085/admin/dlq
+Authorization: Bearer {{admin}}
+
+### ---------------- CATALOG (ADMIN) ----------------
+### 17. Tạo SPU (bản nháp, active=false)
+POST {{gateway}}/api/products/manage
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{"name": "Bình giữ nhiệt {{$random.integer(1000, 9999)}}", "brand": "Webshop Home",
+ "shortDescription": "Giữ nóng 12 giờ", "description": "**Inox 304**, giữ lạnh 24 giờ",
+ "specifications": [{"name": "Chất liệu", "value": "Inox 304"}],
+ "options": [{"name": "Dung tích", "values": ["500ml", "750ml"]}]}
+
+> {% client.global.set("spuId", response.body.id); %}
+
+### 18. Thêm SKU (thuộc tính phải khớp options)
+POST {{gateway}}/api/products/manage/{{spuId}}/skus
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{"skuCode": "BOT-{{$random.integer(1000, 9999)}}-500", "attributes": {"Dung tích": "500ml"}, "priceVnd": 250000}
+
+### 19. Upload ảnh (multipart). Chỉ JPEG/PNG/WebP — kiểm tra bằng nội dung file, không tin đuôi file.
+POST {{gateway}}/api/products/manage/{{spuId}}/images
+Authorization: Bearer {{admin}}
+Content-Type: multipart/form-data; boundary=WebshopBoundary
+
+--WebshopBoundary
+Content-Disposition: form-data; name="file"; filename="photo.png"
+Content-Type: image/png
+
+< ./sample.png
+--WebshopBoundary--
+
+### 20. Bật bán (slug/active bỏ trống = giữ nguyên; nội dung ghi đè)
+PUT {{gateway}}/api/products/manage/{{spuId}}
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{"name": "Bình giữ nhiệt", "active": true, "options": [{"name": "Dung tích", "values": ["500ml", "750ml"]}]}
+
+### ---------------- REVIEW ----------------
+### 21. Đánh giá của một SPU (public)
+GET {{gateway}}/api/reviews/products/{{teeId}}
+
+### 22. Tóm tắt điểm (histogram)
+GET {{gateway}}/api/reviews/products/{{teeId}}/summary
+
+### 23. Tôi có được đánh giá không? (canReview = đã có đơn CONFIRMED chứa SPU này)
+GET {{gateway}}/api/reviews/products/{{teeId}}/mine
+Authorization: Bearer {{token}}
+
+### 24. Viết/sửa đánh giá (PUT idempotent — 403 NOT_PURCHASED nếu chưa mua)
+PUT {{gateway}}/api/reviews/products/{{teeId}}/mine
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"rating": 5, "title": "Vải mát", "content": "Mặc cả ngày không bí, giặt không bị xù."}
+
+### 25. Kiểm duyệt (ADMIN)
+GET {{gateway}}/api/reviews/moderation?status=PUBLISHED
 Authorization: Bearer {{admin}}

@@ -4,7 +4,7 @@ Mỗi mục trả lời: **vì sao dùng**, **giải quyết vấn đề gì**, 
 
 ---
 
-## 1. Database-per-service (một PostgreSQL server, sáu database)
+## 1. Database-per-service (một PostgreSQL server, bảy database)
 
 - **Vì sao**: mỗi service tự quyết schema, migration và vòng đời dữ liệu; không service nào JOIN/UPDATE dữ liệu của service khác.
 - **Giải quyết**: coupling qua schema (đổi cột ở service A làm vỡ service B), "distributed monolith".
@@ -103,7 +103,8 @@ URL các service cấu hình qua biến môi trường (`PRODUCT_SERVICE_URL`, .
 - **Vấn đề**: tìm sản phẩm full-text, không dấu, gõ dở, lọc/sắp xếp theo giá. PostgreSQL `LIKE` không làm được
   (không dấu, độ liên quan, chịu gõ sai) mà vẫn nhanh khi dữ liệu lớn.
 - **Thiết kế**: search-service giữ một **read model** (CQRS) trong Elasticsearch. Debezium đọc WAL của PostgreSQL
-  (logical decoding, `pgoutput`) cho đúng bảng `products` → Kafka → search-service upsert vào index.
+  (logical decoding, `pgoutput`) cho đúng một bảng → Kafka → search-service upsert vào index. Ban đầu là bảng `products`
+  thô; từ khi tách SPU/SKU là bảng `catalog_document` — xem mục 13.
 - **Vì sao CDC thay vì để service tự publish event**: không phải sửa code Product (không có "quên publish" — mọi thay
   đổi đã commit, kể cả UPDATE bằng SQL tay, đều đi ra). Snapshot ban đầu (`snapshot.mode=initial`) dựng index từ dữ
   liệu sẵn có mà không cần job import riêng.
@@ -171,7 +172,106 @@ từng sai và chỉ lộ ra khi chạy với Kafka/Debezium thật:
 
 ### Bảo mật
 
-User `cdc_user` chỉ có `REPLICATION`, `CONNECT` vào `product_db` và `SELECT` đúng bảng `products`; publication chỉ
-chứa bảng đó (Debezium không thấy outbox hay bảng nào khác). Mật khẩu truyền qua `EnvVarConfigProvider`
+User `cdc_user` chỉ có `REPLICATION`, `CONNECT` vào `product_db` và `SELECT` đúng bảng `catalog_document` (trước mục 13
+là bảng `products`); publication chỉ chứa bảng đó (Debezium không thấy outbox hay bảng nào khác). Mật khẩu truyền qua `EnvVarConfigProvider`
 (`${env:CDC_DB_PASSWORD}`), không nằm trong cấu hình connector lưu ở topic `_connect_configs`. Elasticsearch tắt
 security **chỉ ở local**.
+
+## 13. Catalog SPU/SKU và `catalog_document` — CDC trên một bảng "đã công bố" thay vì bảng thô
+
+- **Mô hình**: `product` = **SPU** (thông tin chung: tên, slug, mô tả Markdown, thông số, ảnh, các trục biến thể
+  `options` như Màu/Size); `product_sku` = **SKU** (một tổ hợp giá trị option, có mã, giá, giá gạch ngang, ảnh riêng,
+  trạng thái). **Đơn vị bán là SKU**: giỏ hàng, tồn kho, giữ chỗ, dòng đơn hàng đều mang `skuId`.
+- **Aggregate**: mọi thay đổi SKU/ảnh đi qua `Product` (aggregate root) để kiểm tra bất biến ở một chỗ — thuộc tính SKU
+  khớp đúng options, không hai SKU trùng tổ hợp (unique index `(product_id, attributes)` trên JSONB là chốt chặn
+  cuối), ảnh gắn cho SKU phải là ảnh của chính SPU. Mỗi thay đổi khóa dòng `product` (`SELECT ... FOR UPDATE`):
+  các thao tác trên cùng sản phẩm chạy tuần tự.
+- **Vì sao không CDC từng bảng như trước**: search cần MỘT document mỗi SPU với dữ liệu gộp (giá min/max qua các SKU
+  bán được, ảnh đại diện, điểm đánh giá). Đổi giá một SKU không chạm dòng `product` → CDC bảng thô buộc search-service
+  tự "join" nhiều topic, giữ trạng thái trung gian, xử lý thứ tự chéo topic — phức tạp và dễ sai.
+- **Thiết kế**: product-service ghi bảng `catalog_document(product_id, version, schema_version, payload jsonb)` —
+  một dòng mỗi SPU, ghi đè — **trong cùng transaction** với thay đổi catalog (`ProductWriter` → `CatalogProjection`).
+  Debezium chỉ đọc bảng này (connector `webshop-catalog`, topic `cdc.catalog.public.catalog_document`).
+  - Giống Outbox ở chỗ: ghi nguyên tử cùng nghiệp vụ, hợp đồng (payload) tách khỏi schema nội bộ — đổi tên cột
+    `product_sku` không làm vỡ search (giải trade-off 1 của mục 12).
+  - Khác Outbox ở chỗ: lưu **trạng thái** (ghi đè) chứ không phải chuỗi event. Snapshot ban đầu của Debezium đọc được
+    toàn bộ catalog; mất dữ liệu Kafka (local không mount volume) thì snapshot lại là đủ; topic compacted giữ đúng
+    bản mới nhất mỗi SPU. Outbox thuần (insert rồi xóa) thì snapshot không thấy gì.
+  - `version` tăng bằng `UPSERT ... SET version = version + 1` dưới khóa dòng → search bỏ qua bản cũ đến muộn
+    (cùng cơ chế "chống ghi lùi" của mục 12).
+  - `schema_version` + `CatalogBackfill` (chạy lúc khởi động, trước readiness): SPU chưa có document (tạo bằng SQL
+    migration) hoặc document theo schema cũ được dựng lại — đổi cấu trúc payload = tăng hằng số, không cần job import.
+- **Chi phí**: mỗi thay đổi catalog ghi thêm một dòng JSON (vài KB); payload là hợp đồng phải giữ tương thích (thêm field
+  thoải mái; đổi/bỏ field → tăng `schema_version` và dựng index mới `products-v4`).
+
+### Chuyển dữ liệu cũ mà không chạm database của service khác
+
+`products` cũ có id được Cart/Inventory/Order tham chiếu. Migration V4 biến mỗi dòng cũ thành 1 SPU + 1 **SKU mặc định
+giữ nguyên id cũ**; SPU nhận id mới suy ra tất định (`md5('spu:' || id)`). Nhờ vậy dữ liệu ở service khác vẫn đúng:
+cart/inventory/order chỉ cần **đổi tên cột** `product_id → sku_id` trong migration của chính chúng — không service nào
+đọc/ghi database của service khác, không cần đồng bộ dữ liệu chéo. Dòng `order_item` cũ có `product_id` (SPU) = NULL:
+snapshot đơn hàng bất biến (trigger cấm UPDATE) và Order Service không biết SPU của SKU cũ.
+
+### Đổi hợp đồng message: version 2 + upcast v1
+
+`ReserveInventory` và `OrderConfirmed` chuyển sang **v2** (dòng hàng theo `skuId`; `OrderConfirmed` thêm `productId`,
+`productName`, `variantName` cho review-service). Consumer vẫn nhận **v1** và *upcast* (`productId` cũ chính là id SKU
+mặc định) → message phát trước lúc nâng cấp (đang nằm trong queue, retry queue, DLQ chờ redrive) không bị đẩy vào DLQ
+vì "version không hỗ trợ". Review-service bỏ qua `OrderConfirmed` v1 (không có SPU để ghi nhận lượt mua). Thứ tự triển
+khai an toàn: consumer (cart, inventory, review) trước, producer (order) sau.
+
+## 14. Ảnh sản phẩm: object storage S3 (SeaweedFS ở local), upload qua service, đọc thẳng từ storage
+
+- **Lưu**: object storage tương thích S3 (SeaweedFS ở local; production đổi endpoint sang S3/R2/GCS, không đổi code). Ban đầu dùng MinIO, nhưng MinIO đã
+  ngừng phát hành image cộng đồng — đổi sang SeaweedFS chỉ sửa docker-compose, đúng lợi ích của việc chỉ phụ thuộc S3 API. DB chỉ
+  lưu `object_key`; URL công khai ghép lúc trả response từ `STORAGE_PUBLIC_BASE_URL` (chuyển sang CDN không phải sửa dữ liệu).
+- **Ghi**: backoffice → BFF → gateway (route riêng `product-images`, giới hạn 6MB thay vì 1MB) → product-service.
+  Service kiểm tra **nội dung file** (magic bytes JPEG/PNG/WebP), không tin `Content-Type`/đuôi file — bucket không bao
+  giờ chứa HTML/SVG có script. Key mới cho mỗi lần upload (`products/{spu}/{imageId}.{ext}`) → cache vĩnh viễn
+  (`Cache-Control: immutable`).
+- **Đọc**: chỉ cho đọc object ẩn danh (không liệt kê, không ghi) — local cấu hình bằng identity `anonymous` của
+  SeaweedFS (`infra/seaweedfs/start.sh`), S3 thật dùng bucket policy `s3:GetObject` (product-service tự gửi, best-effort); trình duyệt tải ảnh thẳng từ storage.
+  Ảnh là dữ liệu công khai — proxy qua Java service chỉ tốn thread và băng thông.
+- **Không có transaction chung giữa S3 và PostgreSQL** → chọn thứ tự để lỗi giữa chừng chỉ để lại **file mồ côi** (vô hại),
+  không bao giờ có **dòng DB trỏ tới file không tồn tại**: upload file TRƯỚC rồi ghi DB (ghi DB lỗi → xóa file best-effort);
+  xóa dòng DB TRƯỚC rồi mới xóa file. Lời gọi storage nằm ngoài transaction DB (không giữ khóa dòng SPU khi chờ mạng).
+- **Vì sao không presigned URL** (trình duyệt PUT thẳng lên S3): bớt tải cho service, nhưng cần bước "xác nhận" để kiểm
+  tra file sau khi đã nằm trên storage, cấu hình CORS bucket, và trong Docker host dùng để ký (`object-storage:8333`) khác host
+  trình duyệt gọi (`localhost:8333`) nên chữ ký không khớp. Với ảnh ≤ 5MB của backoffice, upload qua service đơn giản
+  và an toàn hơn.
+- **Chưa có**: resize/thumbnail (CDN xử lý ảnh hoặc job bất đồng bộ), job dọn file mồ côi, credential hẹp hơn cho
+  service (local cấp quyền Admin — production cấp user chỉ có `PutObject/DeleteObject` trên đúng bucket).
+
+## 15. Review-service: chỉ người đã mua mới đánh giá — quyền dựng từ event, không gọi đồng bộ
+
+- **Ai được viết**: review-service nghe `OrderConfirmed` v2 và ghi `purchase(user, product, order)`. Viết đánh giá chỉ
+  kiểm tra bảng của chính nó — không có API "user X đã mua Y chưa?" ở Order Service, và review vẫn chạy khi Order down.
+  Cái giá: eventual consistency — ngay sau khi đơn CONFIRMED có thể trễ vài trăm ms mới viết được (UI giải thích).
+- **Mỗi người một đánh giá mỗi SPU**: `PUT /api/reviews/products/{id}/mine` (idempotent: gửi lại = ghi đè), unique
+  `(product_id, user_id)`. Tên hiển thị che bớt từ claim `email` của JWT (`ng***@gmail.com`), không lưu email đầy đủ.
+- **Tóm tắt điểm đúng khi ghi đồng thời**: mọi thay đổi review của một sản phẩm khóa dòng `product_rating` TRƯỚC, rồi
+  **đếm lại** từ bảng review (không cộng/trừ dồn) dưới khóa. Ở READ COMMITTED, transaction thứ hai chờ khóa và khi đếm
+  sẽ thấy review mà transaction thứ nhất đã commit → không có "lost update" trên tổng.
+- **Đẩy điểm sang nơi hiển thị**: cùng transaction ghi Outbox `ProductRatingChanged{count, sum, version}` → Product Service
+  lưu bản sao (`rating_count/rating_sum`) và ghi lại `catalog_document` → search có điểm để sắp xếp. Gửi **tổng** thay vì
+  "+1 sao" để consumer chỉ cần giữ bản mới nhất; `version` để bỏ qua bản cũ đến muộn (retry queue có thể đảo thứ tự).
+  Trang sản phẩm và search không phụ thuộc review-service còn sống.
+- **Kiểm duyệt**: ADMIN ẩn/hiện qua `/api/reviews/moderation` (đi qua gateway như API nghiệp vụ, không phải `/admin/**`
+  vận hành). Người viết sửa bài đã bị ẩn thì bài **vẫn ẩn** — không "lách" kiểm duyệt bằng cách sửa.
+
+## 16. Tách storefront và backoffice thành hai ứng dụng
+
+- **storefront-ui** (:3000, khách hàng): BFF chỉ chuyển tiếp `/api/**` tới gateway — không có đường tắt vào service.
+  Chỉ có phiên khách hàng.
+- **backoffice-ui** (:3001, nhân viên): mọi trang sau cổng đăng nhập ADMIN; nghiệp vụ quản trị (catalog, tồn kho, kiểm
+  duyệt) đi qua gateway; trang Vận hành gọi thẳng `/admin/**`, `/actuator/**` của từng service qua BFF.
+- **Vì sao tách hẳn** thay vì một app có trang `/admin`:
+  1. **Bề mặt tấn công**: lỗ hổng XSS ở cửa hàng (nơi hiển thị dữ liệu người dùng nhập: đánh giá, tên...) không chạm
+     được token ADMIN — hai origin khác nhau nên `localStorage` tách biệt — và BFF của cửa hàng không có đường tới
+     endpoint vận hành.
+  2. **Triển khai độc lập**: backoffice có thể nằm trong mạng nội bộ/sau VPN/SSO, có nhịp phát hành riêng.
+  3. **Bundle nhỏ hơn** cho khách: không tải code của editor SKU, upload ảnh, DLQ.
+- **Gateway vẫn chỉ xác thực, không phân quyền**: các đường quản trị nằm dưới prefix GET công khai
+  (`/api/products/manage/**`, `/api/reviews/moderation/**`) được gateway yêu cầu token; quyền ADMIN do service kiểm tra.
+- **Chi phí**: hai app trùng một ít code (API client, ErrorBox, Toast, ảnh). Có chủ đích chưa gom thành package dùng chung
+  (npm workspaces) để mỗi app vẫn `npm ci` và build độc lập như các service Java.
