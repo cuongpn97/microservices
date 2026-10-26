@@ -32,8 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "webshop.security.jwt.secret=" + GatewayIT.SECRET,
         "webshop.cors.allowed-origins=http://localhost:3000",
-        "spring.cloud.gateway.server.webflux.default-filters[0].name=RequestSize",
-        "spring.cloud.gateway.server.webflux.default-filters[0].args.maxSize=1KB"
+        "GATEWAY_MAX_REQUEST_SIZE=1KB"
 })
 class GatewayIT {
 
@@ -65,7 +64,7 @@ class GatewayIT {
     @DynamicPropertySource
     static void routes(DynamicPropertyRegistry registry) {
         String url = "http://127.0.0.1:" + BACKEND.getAddress().getPort();
-        for (String svc : List.of("AUTH", "PRODUCT", "CART", "INVENTORY", "PAYMENT", "ORDER", "SEARCH")) {
+        for (String svc : List.of("AUTH", "PRODUCT", "CART", "INVENTORY", "PAYMENT", "ORDER", "SEARCH", "REVIEW")) {
             registry.add(svc + "_SERVICE_URL", () -> url);
         }
     }
@@ -95,11 +94,15 @@ class GatewayIT {
         assertThat(LAST_HEADERS.get("x-correlation-id")).isEqualTo("my-trace-123");
 
         client.get().uri("/api/search/products?q=ban+phim").exchange().expectStatus().isOk();
+        client.get().uri("/api/reviews/products/" + UUID.randomUUID()).exchange().expectStatus().isOk();
     }
 
     @Test
     void protectedRoutesRejectMissingInvalidOrExpiredTokensBeforeReachingBackend() throws Exception {
         client.post().uri("/api/orders/checkout").exchange().expectStatus().isUnauthorized();
+        // Đường quản trị nằm dưới prefix GET công khai (/api/products/**) nhưng vẫn phải có token.
+        client.get().uri("/api/products/manage").exchange().expectStatus().isUnauthorized();
+        client.get().uri("/api/reviews/moderation").exchange().expectStatus().isUnauthorized();
         client.get().uri("/api/cart").header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt")
                 .exchange().expectStatus().isUnauthorized();
         client.get().uri("/api/cart").header(HttpHeaders.AUTHORIZATION, "Bearer " + token(-60, "webshop-auth"))

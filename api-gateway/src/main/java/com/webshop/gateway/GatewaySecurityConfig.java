@@ -39,8 +39,12 @@ public class GatewaySecurityConfig {
                 .authorizeExchange(ex -> ex
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
                         .pathMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login").permitAll()
-                        .pathMatchers(HttpMethod.GET, "/api/products/**", "/api/inventory/**", "/api/search/**")
-                        .permitAll()
+                        // Đường quản trị nằm dưới các prefix GET công khai → phải khai báo TRƯỚC (rule khớp trước thắng).
+                        // Gateway chỉ đòi token hợp lệ; quyền ADMIN do service tự kiểm tra (gateway không phân quyền).
+                        .pathMatchers("/api/products/manage/**", "/api/reviews/moderation/**",
+                                "/api/reviews/products/*/mine").authenticated()
+                        .pathMatchers(HttpMethod.GET, "/api/products/**", "/api/inventory/**", "/api/search/**",
+                                "/api/reviews/**").permitAll()
                         .pathMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
                         // Swagger UI tổng hợp + spec của từng service (chỉ đọc).
                         .pathMatchers(HttpMethod.GET, "/swagger-ui.html", "/swagger-ui/**", "/webjars/**",
